@@ -807,7 +807,7 @@ fn editor_screen_spans_carry_no_control_characters() {
             }
         }
         assert_eq!(row_text(&screen, 0), "  1 a ?[31mred?[0m ?]0;t?");
-        assert_eq!(row_text(&screen, 1), "  2 b ? ?  c");
+        assert_eq!(row_text(&screen, 1), "  2 b ? ?   c");
         assert!(!screen.status.chars().any(char::is_control));
         assert!(!screen.message.chars().any(char::is_control));
     }

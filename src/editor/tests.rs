@@ -481,15 +481,16 @@ fn view_shows_control_characters_as_safe_one_column_stand_ins() {
         for (i, line) in v.lines.iter().enumerate() {
             assert!(!has_control(line), "{name} row {i}: {line:?}");
             if i < e.buffer.line_count() {
-                // One display char per buffer char, so columns stay aligned.
+                // One display char per buffer char (a tab draws up to the
+                // next tab stop), so columns stay aligned.
                 let raw = e.buffer.line(i);
-                assert_eq!(line.chars().count(), raw.chars().count(), "{name} row {i}");
-                assert_eq!(*line, crate::text::sanitize(&raw), "{name} row {i}");
+                let cells = crate::text::layout(&raw, 0, 60).len();
+                assert_eq!(line.chars().count(), cells, "{name} row {i}");
             }
         }
         assert_eq!(v.lines[0], "red ?[31mX?[0m end");
         assert_eq!(v.lines[1], "set ?]0;t? title");
-        assert_eq!(v.lines[4], "del ? c1 ?2J tab");
+        assert_eq!(v.lines[4], "del ? c1 ?2J    tab");
         assert!(!has_control(&v.status), "{:?}", v.status);
         assert!(!has_control(&v.message), "{:?}", v.message);
         assert_eq!(v.message, "Save failed: ?]52;c;eA==? ?");

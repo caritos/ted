@@ -3,9 +3,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::buffer::{Buffer, Found};
 use crate::highlight::{highlight_line, Language, LineState, Token};
 use crate::screen::Style;
-use crate::text::sanitize_char;
+use crate::text::{display_col, layout, sanitize_char, TAB_STOP};
 
-const TAB_WIDTH: usize = 4;
 /// Page size before the first frame tells the editor the screen height.
 const DEFAULT_PAGE: usize = 20;
 
@@ -281,7 +280,7 @@ impl Editor {
             KeyCode::Backspace => self.buffer.backspace(),
             KeyCode::Delete => self.buffer.delete(),
             KeyCode::Tab => {
-                for _ in 0..TAB_WIDTH {
+                for _ in 0..TAB_STOP {
                     self.buffer.insert_char(' ');
                 }
             }
@@ -315,6 +314,8 @@ impl Editor {
         // The gutter takes columns from the left; scrolling uses the rest.
         let gutter = self.gutter_width(width);
         let text_width = width - gutter;
+        // Columns here are display columns: a tab spans up to the next stop.
+        let col = display_col(&self.buffer.line(row), col);
         if text_width > 0 {
             if col < self.scroll_col {
                 self.scroll_col = col;
@@ -323,17 +324,21 @@ impl Editor {
             }
         }
 
-        let text: Vec<String> = (0..text_rows)
-            .map(|i| {
-                let r = self.scroll_row + i;
-                if r < self.buffer.line_count() {
-                    clip(&self.buffer.line(r), self.scroll_col, text_width)
-                } else {
-                    clip("~", 0, text_width)
-                }
-            })
-            .collect();
-        let mut styles = self.styles(&text, text_width);
+        let mut text: Vec<String> = Vec::with_capacity(text_rows);
+        let mut layouts: Vec<Vec<usize>> = Vec::with_capacity(text_rows);
+        for i in 0..text_rows {
+            let r = self.scroll_row + i;
+            if r < self.buffer.line_count() {
+                let line = self.buffer.line(r);
+                let cells = layout(&line, self.scroll_col, text_width);
+                text.push(draw_cells(&line, &cells));
+                layouts.push(cells);
+            } else {
+                text.push(clip("~", 0, text_width));
+                layouts.push(Vec::new());
+            }
+        }
+        let mut styles = self.styles(&text, &layouts);
         let mut lines = text;
         if gutter > 0 {
             let digits = gutter - 1;
@@ -385,7 +390,7 @@ impl Editor {
     /// Multi-line state (block comments, strings) at the top of the viewport
     /// comes from `line_states`, which is cut back to the first edited row
     /// and then extended only as far as the first visible row.
-    fn styles(&mut self, lines: &[String], width: usize) -> Vec<Vec<Style>> {
+    fn styles(&mut self, lines: &[String], layouts: &[Vec<usize>]) -> Vec<Vec<Style>> {
         let language = self.buffer.path().and_then(Language::from_path);
         let dirty = self.buffer.take_dirty_row();
         if language != self.highlighted {
@@ -426,7 +431,7 @@ impl Editor {
             if self.line_states.len() == r + 1 {
                 self.line_states.push(next);
             }
-            rows.push(tokens.iter().skip(self.scroll_col).take(width).map(|t| token_style(*t)).collect());
+            rows.push(layouts[i].iter().map(|&c| token_style(tokens[c])).collect());
         }
         rows
     }
@@ -480,6 +485,16 @@ fn token_style(token: Token) -> Style {
     }
 }
 
+/// The cells of `line` chosen by `text::layout`, each the sanitized source
+/// char (a tab cell is a space). Only the chars the cells need are read.
+fn draw_cells(line: &str, cells: &[usize]) -> String {
+    let (Some(&first), Some(&last)) = (cells.first(), cells.last()) else {
+        return String::new();
+    };
+    let chars: Vec<char> = line.chars().skip(first).take(last - first + 1).collect();
+    cells.iter().map(|&i| sanitize_char(chars[i - first])).collect()
+}
+
 /// `width` chars of `text` starting at char `skip`, sanitized one char for
 /// one char. Every string in a `View` (rows, status, message) is built here,
 /// so text from the file, its name or an error can never reach the terminal
@@ -492,5 +507,7 @@ fn clip(text: &str, skip: usize, width: usize) -> String {
 mod gutter_tests;
 #[cfg(test)]
 mod prompt_tests;
+#[cfg(test)]
+mod tab_tests;
 #[cfg(test)]
 mod tests;

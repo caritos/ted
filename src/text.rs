@@ -2,6 +2,43 @@
 
 use crate::screen::{Row, Span, Style};
 
+/// Columns between tab stops; the Tab key inserts this many spaces too.
+pub const TAB_STOP: usize = 4;
+
+/// Display column where char index `char_col` of `line` starts: a tab
+/// advances to the next tab stop, every other char takes one column. Chars
+/// missing past the end of the line count one column each.
+pub fn display_col(line: &str, char_col: usize) -> usize {
+    let mut col = 0;
+    let mut seen = 0;
+    for c in line.chars().take(char_col) {
+        col += if c == '\t' { TAB_STOP - col % TAB_STOP } else { 1 };
+        seen += 1;
+    }
+    col + (char_col - seen)
+}
+
+/// For display columns `skip..skip + width` (stopping at the end of the
+/// line) the char index of `line` drawn in each cell. A tab yields its own
+/// index once per cell it covers, so a tab cut by the left edge shows only
+/// its remaining cells. Walks no further than the last needed column.
+pub fn layout(line: &str, skip: usize, width: usize) -> Vec<usize> {
+    let end = skip.saturating_add(width);
+    let mut cells = Vec::with_capacity(width.min(line.len()));
+    let mut col = 0;
+    for (i, c) in line.chars().enumerate() {
+        if col >= end {
+            break;
+        }
+        let w = if c == '\t' { TAB_STOP - col % TAB_STOP } else { 1 };
+        let from = col.max(skip);
+        let to = (col + w).min(end);
+        cells.extend(std::iter::repeat_n(i, to.saturating_sub(from)));
+        col += w;
+    }
+    cells
+}
+
 /// First row to show so that `selected` is inside a window of `height` rows.
 pub(crate) fn window_start(selected: usize, height: usize) -> usize {
     (selected + 1).saturating_sub(height.max(1))
@@ -59,6 +96,31 @@ mod tests {
             assert_eq!(sanitize_char(c), '?', "U+{:04X}", c as u32);
         }
         assert_eq!(sanitize("a\u{202E}b"), "a?b");
+    }
+
+    #[test]
+    fn display_col_advances_tabs_to_the_next_stop() {
+        assert_eq!([0, 1, 2, 3].map(|c| display_col("a\tb", c)), [0, 1, 4, 5]);
+        assert_eq!(display_col("\t\tx", 2), 8);
+        assert_eq!(display_col("abc", 5), 5);
+        assert_eq!(display_col("a\t", 4), 6);
+    }
+
+    #[test]
+    fn layout_maps_cells_to_source_chars() {
+        assert_eq!(layout("a\tb", 0, 10), vec![0, 1, 1, 1, 2]);
+        assert_eq!(layout("\tx", 2, 3), vec![0, 0, 1]);
+        assert_eq!(layout("abc", 1, 1), vec![1]);
+        assert_eq!(layout("abc", 0, 0), Vec::<usize>::new());
+        assert_eq!(layout("", 0, 5), Vec::<usize>::new());
+        assert_eq!(layout("abc", 5, 5), Vec::<usize>::new());
+        assert_eq!(layout("\t\tx", 3, 3), vec![0, 1, 1]);
+    }
+
+    #[test]
+    fn layout_of_a_huge_line_stops_at_the_width() {
+        let line = "x".repeat(1_000_000);
+        assert_eq!(layout(&line, 0, 10).len(), 10);
     }
 
     #[test]

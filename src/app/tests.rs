@@ -663,3 +663,66 @@ fn screen_in_tree_mode_never_panics_for_tiny_sizes() {
         }
     }
 }
+
+/// Opens the tree on `dir` (whose only entry is the one to open) with an
+/// editor holding "keep", presses Enter, and returns (still in the tree,
+/// message, editor text, editor has no path). Runs on a thread so a hang
+/// fails the test instead of blocking it.
+fn enter_in_tree_with_timeout(dir: PathBuf) -> (bool, String, String, bool) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut app = app_with(Editor::new(Buffer::from_text("keep")), dir, one_file());
+        app.handle_key(ctrl('t'), t(1000));
+        app.handle_key(key(KeyCode::Enter), t(1000));
+        let message = app.screen(80, 6, t(1000)).message;
+        let _ = tx.send((
+            app.in_file_tree(),
+            message,
+            app.editor().buffer().text(),
+            app.editor().buffer().path().is_none(),
+        ));
+    });
+    rx.recv_timeout(Duration::from_secs(5)).expect("Enter in the tree hung")
+}
+
+#[cfg(unix)]
+#[test]
+fn enter_on_socket_in_tree_is_refused_as_not_a_regular_file() {
+    let dir = Temp::new("sock");
+    let _listener = std::os::unix::net::UnixListener::bind(dir.0.join("s")).unwrap();
+    let (in_tree, message, text, no_path) = enter_in_tree_with_timeout(dir.0.clone());
+    assert!(in_tree);
+    assert_eq!(message, "Not a regular file");
+    assert_eq!(text, "keep");
+    assert!(no_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn enter_on_fifo_in_tree_is_refused_without_hanging() {
+    let dir = Temp::new("fifo");
+    let made = std::process::Command::new("mkfifo").arg(dir.0.join("f")).status();
+    if !made.is_ok_and(|s| s.success()) {
+        eprintln!("mkfifo unavailable; skipping");
+        return;
+    }
+    let (in_tree, message, text, no_path) = enter_in_tree_with_timeout(dir.0.clone());
+    assert!(in_tree);
+    assert_eq!(message, "Not a regular file");
+    assert_eq!(text, "keep");
+    assert!(no_path);
+}
+
+#[test]
+fn enter_on_file_over_64_mib_in_tree_is_refused_as_too_large() {
+    let dir = Temp::new("big");
+    let file = fs::File::create(dir.0.join("big.bin")).unwrap();
+    // Sparse: cheap to create, no data written.
+    file.set_len(64 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let (in_tree, message, text, no_path) = enter_in_tree_with_timeout(dir.0.clone());
+    assert!(in_tree);
+    assert_eq!(message, "File too large");
+    assert_eq!(text, "keep");
+    assert!(no_path);
+}

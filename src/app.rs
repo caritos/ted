@@ -12,6 +12,9 @@ use crate::git::Git;
 use crate::gitview::{GitAction, GitView};
 use crate::screen::{Screen, Span, Style};
 
+/// Largest file the views will open (64 MiB); `Buffer::open` reads it all.
+const MAX_OPEN_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Which view is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -186,11 +189,18 @@ impl App {
             return Err("Unsaved changes: save or quit first".to_string());
         }
         // `Buffer::open` treats a missing file as new, and a later save
-        // would recreate it. `try_exists` follows symlinks, so a dangling
+        // would recreate it. `metadata` follows symlinks, so a dangling
         // link or an unreadable parent is refused too.
         let path = self.location.join(rel);
-        if !matches!(path.try_exists(), Ok(true)) {
+        let Ok(meta) = std::fs::metadata(&path) else {
             return Err("File no longer exists".to_string());
+        };
+        // Reading a FIFO or a device can block forever (or never end).
+        if !meta.is_file() {
+            return Err("Not a regular file".to_string());
+        }
+        if meta.len() > MAX_OPEN_BYTES {
+            return Err("File too large".to_string());
         }
         Buffer::open(&path).map_err(|e| format!("Open failed: {e}"))
     }

@@ -158,7 +158,9 @@ impl Editor {
             styles,
             status: clip(&self.status_line(width), 0, width),
             message: clip(&self.message, 0, width),
-            cursor: (row - self.scroll_row, col - self.scroll_col),
+            // With no text rows or no width the scroll is left alone, so the
+            // cursor may sit above or left of it: clamp to 0, never underflow.
+            cursor: (row.saturating_sub(self.scroll_row), col.saturating_sub(self.scroll_col)),
         }
     }
 

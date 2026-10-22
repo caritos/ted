@@ -405,7 +405,7 @@ impl Lcg {
 fn cached_styles_match_a_from_scratch_walk_after_every_edit() {
     let text: String = (0..60).map(|i| format!("let v{i} = \"s\"; // c\n")).collect();
     let chars = ['/', '*', '"', '\\', '#', '[', ']', 'r', '\'', 'a', ' '];
-    let sizes = [(30, 8), (12, 5), (50, 20), (20, 3), (40, 4)];
+    let sizes = [(30, 8), (12, 5), (50, 20), (20, 3), (40, 1)];
     for seed in 1..=4u64 {
         let mut e = named_editor("a.rs", &text);
         let mut rng = Lcg(seed);
@@ -608,4 +608,80 @@ fn saving_a_file_with_control_characters_writes_the_original_bytes() {
     e.handle_key(ctrl('s'));
     assert!(e.message().starts_with("Saved"), "{}", e.message());
     assert_eq!(fs::read(&path).unwrap(), NASTY.as_bytes());
+}
+
+// ---- Tiny terminals after scrolling ----
+
+fn long_text() -> String {
+    (0..12).map(|i| format!("let v{i} = \"abcdefghij\"; // c\n")).collect()
+}
+
+/// `v` fits a `width` x `height` terminal and the cursor is inside the text
+/// area whenever there is one.
+fn assert_fits(v: &View, width: usize, height: usize) {
+    let at = format!("{width}x{height}");
+    assert!(v.lines.len() <= height.saturating_sub(2), "{at}: {} rows", v.lines.len());
+    assert!(v.lines.iter().all(|l| l.chars().count() <= width), "{at}: {:?}", v.lines);
+    assert_aligned(v);
+    assert!(v.status.chars().count() <= width, "{at}: {:?}", v.status);
+    assert!(v.message.chars().count() <= width, "{at}: {:?}", v.message);
+    if !v.lines.is_empty() && width > 0 {
+        assert!(v.cursor.0 < v.lines.len() && v.cursor.1 < width, "{at}: cursor {:?}", v.cursor);
+    }
+}
+
+#[test]
+fn view_with_no_text_rows_after_scrolling_down_does_not_underflow() {
+    let mut e = named_editor("a.txt", &long_text());
+    press(&mut e, KeyCode::Down, 11);
+    e.view(40, 6); // scroll_row > 0
+    press(&mut e, KeyCode::Up, 11);
+    for h in 0..3 {
+        let v = e.view(40, h);
+        assert_fits(&v, 40, h);
+    }
+    // Back at a normal size the cursor row scrolls into view again.
+    let v = e.view(40, 6);
+    assert_eq!(v.cursor, (0, 0));
+    assert!(v.lines[0].starts_with("let v0 "), "{:?}", v.lines);
+}
+
+#[test]
+fn view_with_zero_width_after_scrolling_right_does_not_underflow() {
+    let mut e = named_editor("a.txt", &long_text());
+    press(&mut e, KeyCode::Right, 20);
+    e.view(5, 6); // scroll_col > 0
+    press(&mut e, KeyCode::Left, 20);
+    let v = e.view(0, 6);
+    assert_fits(&v, 0, 6);
+    let v = e.view(5, 6);
+    assert_eq!(v.cursor, (0, 0));
+    assert_eq!(v.lines[0], "let v");
+}
+
+#[test]
+fn view_fits_every_tiny_size_after_scrolling_and_returning_to_the_top_left() {
+    for name in ["a.rs", "a.txt"] {
+        for width in 0..=6 {
+            for height in 0..=6 {
+                let mut e = named_editor(name, &long_text());
+                e.message = "a long message that is wider than the terminal".to_string();
+                press(&mut e, KeyCode::Down, 11);
+                press(&mut e, KeyCode::Right, 25);
+                assert_fits(&e.view(width, height), width, height);
+                e.view(30, 8); // scrolled down and right at a normal size
+                press(&mut e, KeyCode::Up, 11);
+                press(&mut e, KeyCode::Left, 40);
+                assert_eq!(e.buffer.cursor(), (0, 0));
+                let v = e.view(width, height);
+                assert_fits(&v, width, height);
+                // Shrinking through every other size never panics either.
+                for w in 0..=6 {
+                    for h in 0..=6 {
+                        assert_fits(&e.view(w, h), w, h);
+                    }
+                }
+            }
+        }
+    }
 }

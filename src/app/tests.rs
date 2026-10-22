@@ -821,3 +821,33 @@ fn editor_screen_spans_carry_no_control_characters() {
         assert!(!screen.message.chars().any(char::is_control));
     }
 }
+
+#[test]
+fn editor_screen_survives_tiny_sizes_after_scrolling() {
+    let text: String = (0..12).map(|i| format!("fn f{i}() {{ \"long string here\" }} // c\n")).collect();
+    let dir = Temp::new("tinyscroll");
+    dir.file("s.rs", &text);
+    let editor = Editor::new(Buffer::open(&dir.0.join("s.rs")).unwrap());
+    let mut app = app_with(editor, dir.0.clone(), one_file());
+    for _ in 0..11 {
+        app.handle_key(key(KeyCode::Down), t(1000));
+    }
+    for _ in 0..20 {
+        app.handle_key(key(KeyCode::Right), t(1000));
+    }
+    app.screen(10, 5, t(1000));
+    for _ in 0..11 {
+        app.handle_key(key(KeyCode::Up), t(1000));
+    }
+    for _ in 0..40 {
+        app.handle_key(key(KeyCode::Left), t(1000));
+    }
+    for w in 0..=6 {
+        for h in 0..=6 {
+            let screen = app.screen(w, h, t(1000));
+            assert!(screen.rows.len() <= h.saturating_sub(2));
+            assert!(screen.rows.iter().all(|r| r.iter().map(|s| s.text.chars().count()).sum::<usize>() <= w));
+            assert!(screen.status.chars().count() <= w && screen.message.chars().count() <= w);
+        }
+    }
+}

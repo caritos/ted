@@ -486,6 +486,41 @@ fn render_styles_diff_lines() {
 }
 
 #[test]
+fn render_styles_dashes_and_pluses_after_hunk_as_changes() {
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, "q.sql", Some(t(1)));
+    git.diffs.insert(
+        "q.sql".to_string(),
+        "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- sql comment\n+++x\n-diff\n+index\n".to_string(),
+    );
+    let mut view = refreshed(&git);
+    let styles = |screen: &Screen| -> Vec<Style> {
+        screen.rows.iter().filter_map(|r| r.get(2)).map(|s| s.style).collect()
+    };
+    let screen = view.render(80, 10, t(1000));
+    assert_eq!(
+        styles(&screen),
+        vec![
+            Style::Dim,
+            Style::Dim,
+            Style::Dim,
+            Style::Hunk,
+            Style::Removed,
+            Style::Added,
+            Style::Removed,
+            Style::Added,
+        ]
+    );
+    // Scrolled past the hunk header, the styles still know it was there.
+    let long: String = format!("--- a/q\n+++ b/q\n@@ -1 +1 @@\n{}", "--- c\n".repeat(30));
+    git.diffs.insert("q.sql".to_string(), long);
+    view.refresh(&git, t(1001));
+    view.handle_key(key(KeyCode::PageDown), &git, t(1001));
+    let screen = view.render(80, 6, t(1001));
+    assert!(styles(&screen).iter().all(|s| *s == Style::Removed), "{:?}", styles(&screen));
+}
+
+#[test]
 fn render_diff_respects_scroll() {
     let mut git = FakeGit::new();
     git.add(ChangeKind::Modified, "a.rs", Some(t(1)));

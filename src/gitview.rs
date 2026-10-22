@@ -335,7 +335,7 @@ impl GitView {
         if self.entries.is_empty() {
             left.push(("No changes since baseline".to_string(), Style::Dim));
         }
-        let mut diff = self.diff.lines().skip(self.diff_scroll);
+        let mut diff = styled_diff_lines(&self.diff).skip(self.diff_scroll);
 
         (0..body_h)
             .map(|i| {
@@ -343,9 +343,9 @@ impl GitView {
                 let mut row: Row = vec![Span { text: pad(&text, list_w), style }];
                 if width > list_w {
                     row.push(Span { text: "|".to_string(), style: Style::Dim });
-                    if let Some(line) = diff.next() {
+                    if let Some((line, style)) = diff.next() {
                         let text = clip(&line.replace('\t', "    "), right_w);
-                        row.push(Span { text, style: diff_style(line) });
+                        row.push(Span { text, style });
                     }
                 }
                 row
@@ -404,8 +404,25 @@ fn window_start(selected: usize, height: usize) -> usize {
     (selected + 1).saturating_sub(height.max(1))
 }
 
-fn diff_style(line: &str) -> Style {
-    if ["diff", "index", "---", "+++"].iter().any(|p| line.starts_with(p)) {
+/// Each diff line with its style. File header lines (`diff`, `index`,
+/// `---`, `+++`) are only recognised before a file's first hunk; inside a
+/// hunk `--- x` is a removed line and `+++x` an added one.
+fn styled_diff_lines(diff: &str) -> impl Iterator<Item = (&str, Style)> {
+    let mut in_header = true;
+    diff.lines().map(move |line| {
+        // Hunk body lines start with ' ', '+', '-' or '\', so a `diff `
+        // line always begins the next file's header.
+        if line.starts_with("diff ") {
+            in_header = true;
+        } else if line.starts_with("@@") {
+            in_header = false;
+        }
+        (line, diff_style(line, in_header))
+    })
+}
+
+fn diff_style(line: &str, in_header: bool) -> Style {
+    if in_header && ["diff", "index", "---", "+++"].iter().any(|p| line.starts_with(p)) {
         Style::Dim
     } else if line.starts_with("@@") {
         Style::Hunk

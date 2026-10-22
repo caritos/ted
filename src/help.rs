@@ -26,11 +26,23 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Tab", "Insert 4 spaces"),
             ("Backspace / Delete", "Delete before / under the cursor"),
             ("Ctrl-S", "Save the current buffer"),
+            ("Ctrl-F", "Find text"),
+            ("F3", "Find the next match"),
+            ("Ctrl-L", "Go to a line number"),
             ("F1", "Show this help"),
         ],
     ),
     // Right after Editor so Ctrl-Q is on the first screen of a 24-row terminal.
     ("Quit", &[("Ctrl-Q", "Quit; with unsaved changes press it again")]),
+    (
+        "Find / go to line prompt",
+        &[
+            ("Enter", "Accept and stay at the match"),
+            ("Esc", "Cancel; the cursor goes back"),
+            ("Down / Ctrl-F", "Next match"),
+            ("Up", "Previous match"),
+        ],
+    ),
     (
         "Help",
         &[
@@ -177,7 +189,7 @@ mod tests {
     fn table_lists_every_documented_key() {
         let keys: Vec<&str> = HELP.iter().flat_map(|(_, rows)| rows.iter().flat_map(|(k, _)| k.split(" / "))).collect();
         for name in [
-            "Ctrl-S", "Ctrl-Q", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
+            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
             "Backspace", "Delete", "Enter", "F1", "Up", "Down", "Left", "Right", "Esc", "r", "b", "q",
         ] {
             assert!(keys.contains(&name), "help table lacks {name}");

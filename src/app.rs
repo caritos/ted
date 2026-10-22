@@ -193,7 +193,16 @@ impl App {
             // Ctrl-Q is another key to a pending close warning; its own
             // warning replaces that message.
             self.close_armed = false;
+            if self.mode == Mode::Editor {
+                self.editor_mut().cancel_prompt();
+            }
             return self.quit();
+        }
+        // An open prompt gets every other key, so Ctrl-G/T/O/N/P/W, F1 and `?`
+        // are text or ignored there instead of their global action.
+        if self.mode == Mode::Editor && self.editor().in_prompt() {
+            self.close_armed = false;
+            return self.editor_mut().handle_key(key);
         }
         let is_close = ctrl && key.code == KeyCode::Char('w');
         // Any key but Ctrl-W withdraws a pending close warning.

@@ -13,7 +13,7 @@ fn is_help(app: &mut App) -> bool {
 }
 
 /// Puts `app` in the place named: "editor", "git", "tree" or "list".
-fn go(app: &mut App, place: &str) {
+pub(super) fn go(app: &mut App, place: &str) {
     match place {
         "git" => {
             app.handle_key(ctrl('g'), t(1000));
@@ -28,7 +28,7 @@ fn go(app: &mut App, place: &str) {
     }
 }
 
-fn at(app: &App, place: &str) -> bool {
+pub(super) fn at(app: &App, place: &str) -> bool {
     match place {
         "git" => app.in_git_view(),
         "tree" => app.in_file_tree(),

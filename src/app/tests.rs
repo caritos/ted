@@ -39,6 +39,7 @@ impl Git for Shared {
 }
 
 mod help;
+mod search;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)

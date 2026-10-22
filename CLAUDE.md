@@ -5,6 +5,10 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 ## Layout
 - `src/buffer.rs` - rope-backed text + cursor + file load/atomic save. No terminal code.
 - `src/editor.rs` - key handling, scrolling, status/message, quit confirmation. `Editor::view()` returns a pure `View`.
+- `src/git.rs` - runs the `git` CLI (read-only) behind a `Git` trait: status, diff, log, baseline. No terminal code.
+- `src/gitview.rs` - git view state machine: file list, selection by path, diff scroll, commit picker, refresh.
+- `src/app.rs` - owns the `Editor` and the optional git view; Ctrl-G / `q` switch modes.
+- `src/screen.rs` - plain `Screen` value (cells + styles) that both modes render to.
 - `src/main.rs` - thin crossterm layer only: raw mode, read keys, draw the `View`. Keep logic out of it.
 - `scripts/pty_smoke.py` - drives the release binary through a pty.
 
@@ -26,4 +30,8 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Not yet verified by hand: look and feel, resize, Option/Alt keys, unsaved-changes quit warning.
 - Deferred: Home/End, PageUp/Down, undo, search, save-as prompt for unnamed buffers, wide-char (CJK/emoji) cursor alignment, syntax highlighting.
 - History: an earlier SwiftUI Mac app attempt lives at git tag `swift-mac-app`.
+### 2026-10-22 (git changes view)
+- Done (unit-tested + pty smoke): `ted <dir>` opens an empty buffer located in that directory; Ctrl-G opens the git view (file list + diff), Up/Down, PageUp/PageDown, Enter opens a file, `r` resets the baseline, `b` recent-commits picker, `q`/Esc back; "not a git repository" shown for a non-repo. Design: `docs/superpowers/specs/2026-10-22-changes-viewer-design.md`.
+- Not yet verified by hand: the live refresh while Claude edits files, resize inside the git view, colors on a real terminal, a very large repo.
+- Deferred: wide-char alignment in the git view, mouse, word diffs, a configurable refresh rate.
 - Environment: Homebrew rustup is keg-only; `~/src/config/zsh/zshenv` now adds it and `~/.cargo/bin` to PATH (change is uncommitted in the config repo). See README.md for user-facing docs.

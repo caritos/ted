@@ -2,14 +2,16 @@ import fcntl
 import os
 import pty
 import select
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import termios
 import time
 
 BIN = sys.argv[1]
-CTRL_S, CTRL_Q = b"\x13", b"\x11"
+CTRL_S, CTRL_Q, CTRL_G = b"\x13", b"\x11", b"\x07"
 failures = []
 
 
@@ -124,6 +126,63 @@ check("binary file untouched", open(path5, "rb").read() == b"\xff\xfe\x00\xc0")
 pid, fd = spawn(["a", "b"])
 out = drain(fd)
 check("usage error exits 2", wait_exit(pid) == 2 and b"usage" in out, out)
+
+# 7. git view in a repo: changed + untracked files, diff lines, back to editor
+repo = tempfile.mkdtemp(prefix="ted-smoke-repo-")
+
+
+def git(*args):
+    subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True)
+
+
+git("init", "-q")
+git("config", "user.name", "Smoke Test")
+git("config", "user.email", "smoke@example.com")
+git("config", "commit.gpgsign", "false")
+open(os.path.join(repo, "tracked.txt"), "w").write("old line\n")
+git("add", "tracked.txt")
+git("commit", "-q", "-m", "initial")
+open(os.path.join(repo, "tracked.txt"), "w").write("old line\nadded line\n")
+open(os.path.join(repo, "fresh.txt"), "w").write("brand new\n")
+pid, fd = spawn([repo])
+drain(fd)
+send(fd, CTRL_G)
+out = drain(fd, 1.0)
+check("git view lists tracked file", b"tracked.txt" in out, out[-300:])
+check("git view lists untracked file", b"fresh.txt" in out, out[-300:])
+check("git view shows a + diff line", b"+added line" in out or b"+brand new" in out, out[-300:])
+send(fd, b"q")
+drain(fd)
+send(fd, b"z")
+out = drain(fd)
+check("q returns to editor", b"[+]" in out, out[-200:])
+send(fd, CTRL_Q)
+drain(fd)
+check("unsaved quit still warns after git view", wait_exit(pid, 0.3) is None)
+send(fd, CTRL_Q)
+drain(fd)
+check("git view session exits 0", wait_exit(pid) == 0)
+shutil.rmtree(repo, ignore_errors=True)
+
+# 8. git view outside a repo reports it and recovers
+plain = tempfile.mkdtemp(prefix="ted-smoke-norepo-")
+pid, fd = spawn([plain])
+drain(fd)
+send(fd, CTRL_G)
+out = drain(fd, 1.0)
+check("non-repo says not a git repository", b"not a git repository" in out, out[-300:])
+send(fd, b"q")
+drain(fd)
+send(fd, b"z")
+out = drain(fd)
+check("non-repo q returns to editor", b"[+]" in out, out[-200:])
+send(fd, CTRL_Q)
+drain(fd)
+send(fd, CTRL_Q)
+drain(fd)
+check("non-repo session exits 0", wait_exit(pid) == 0)
+shutil.rmtree(plain, ignore_errors=True)
+shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))
 sys.exit(1 if failures else 0)

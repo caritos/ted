@@ -3,7 +3,7 @@
 A small terminal text editor in Rust, for my own use. Goal: it just works, no configuration.
 
 ## Layout
-- `src/buffer.rs` - rope-backed text + cursor + file load/atomic save. No terminal code.
+- `src/buffer.rs` - rope-backed text + cursor + file load/atomic save; records the lowest edited row (`take_dirty_row`) for the highlight cache. No terminal code.
 - `src/editor.rs` - key handling, scrolling, status/message, quit confirmation. `Editor::view()` returns a pure `View`.
 - `src/git.rs` - runs the `git` CLI (read-only) behind a `Git` trait: status, diff, log, baseline. No terminal code.
 - `src/gitview.rs` - git view state machine: file list, selection by path, diff scroll, commit picker, refresh.
@@ -11,7 +11,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - `src/filetree.rs` - read-only file tree state (expansion, selection, refresh, rendering to rows). No terminal code.
 - `src/app.rs` - owns the `Editor`, the optional git view and file tree (`Mode` enum); Ctrl-G / Ctrl-T / `q` switch modes.
 - `src/screen.rs` - plain `Screen` value (rows of styled spans) that both modes render to; `Style` includes the syntax styles.
-- `src/highlight.rs` - Rust tokenizer (std only, char-based), chosen by file extension; `Editor::view` fills per-char styles from it.
+- `src/highlight.rs` - Rust tokenizer (std only, char-based), chosen by file extension; `Editor::view` fills per-char styles from it, caching the `LineState` at the start of each line (cut back at the buffer's dirty row, cleared on `Editor::load` or a language change).
 - `src/main.rs` - thin crossterm layer only: raw mode, read keys, draw the `View`. Keep logic out of it.
 - `scripts/pty_smoke.py` - drives the release binary through a pty.
 
@@ -45,7 +45,10 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Deferred: wide-char alignment in the git view, mouse, word diffs, a configurable refresh rate.
 
 ### 2026-10-22 (syntax highlighting)
-- Done (unit-tested, 226 tests): Rust tokenizer in `highlight.rs`, wired through `Editor::view`, `App::editor_screen` and `main.rs`; `.rs` files only, always on, no config.
-- Done (pty smoke, 46 checks, 7 new): `.rs` file emits magenta before `fn`, green before the string, dark grey before the comment; a `.txt` file with the same text has no color sequences. Confirmed the new checks fail with highlighting stubbed out.
-- Not yet verified by hand: how the colors look on a real terminal and theme readability (especially dark grey comments); scroll speed on a very large Rust file.
-- Deferred: other languages, a highlight-state cache, highlighting in the git diff and the file tree, a theme or toggle.
+- Done (unit-tested, 237 tests in total): Rust tokenizer in `highlight.rs`, wired through `Editor::view`, `App::editor_screen` and `main.rs`; `.rs` files only, always on, no config.
+- Done (pty smoke, 47 checks, 8 for highlighting): `.rs` file emits magenta before `fn`, green before the string, dim (`\x1b[2m`) before the comment; a `.txt` file with the same text has no color or dim sequences. Confirmed the highlighting checks fail with highlighting stubbed out.
+- Colors: keyword magenta, type yellow, string green, comment: dim (normal foreground; dark grey was about 2.2:1 contrast on catppuccin-frappe), number cyan, meta blue.
+- Done (unit-tested): highlight line-state cache. `Buffer` records the lowest edited row (Enter, Backspace at column 0 and Delete at end of line record the row above); `Editor` truncates its per-line state cache there and walks only to the first visible row. Tests compare the cached grid with a from-scratch walk after every step of a randomized edit sequence and count walked lines.
+- Measured by script, not by hand (release build, keypress then `Editor::view(120, 40)` with the cursor at the bottom, scratch bench crate): before/after the cache, 10k lines 8.7 ms -> 0.09 ms, 100k lines 85 ms -> 0.06 ms; scrolling one row 7.9 ms -> 0.1 ms (10k) and 85 ms -> 0.05 ms (100k). The cold first frame at the bottom of a 100k-line file still costs about 85-90 ms once (10k: about 19 ms). A single 1 MB line still costs about 10 ms per frame (the visible line is tokenized whole); `.txt` files about 0.03 ms.
+- Not yet verified by hand: how the colors look on a real terminal and theme readability (including dim comments); scroll feel on a very large Rust file.
+- Deferred: other languages, highlighting in the git diff and the file tree, a theme or toggle, faster tokenizing of a single huge line.

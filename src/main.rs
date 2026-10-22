@@ -140,7 +140,8 @@ fn set_style(out: &mut Stdout, style: Style) -> io::Result<()> {
         Style::Keyword => queue!(out, SetForegroundColor(Color::Magenta)),
         Style::TypeName => queue!(out, SetForegroundColor(Color::Yellow)),
         Style::Str => queue!(out, SetForegroundColor(Color::Green)),
-        Style::Comment => queue!(out, SetForegroundColor(Color::DarkGrey)),
+        // Dim, not a grey color: dark grey is too faint on dark themes.
+        Style::Comment => queue!(out, SetAttribute(Attribute::Dim)),
         Style::Number => queue!(out, SetForegroundColor(Color::Cyan)),
         Style::Meta => queue!(out, SetForegroundColor(Color::Blue)),
         Style::Dir => {

@@ -276,7 +276,7 @@ finally:
 # 11. syntax highlighting: a .rs file is drawn with ANSI colors right before
 # the keyword, string and comment; a .txt file with identical text has none.
 # crossterm emits the 256-color form: magenta \x1b[38;5;13m, green
-# \x1b[38;5;10m, dark grey \x1b[38;5;8m.
+# \x1b[38;5;10m; comments are dim (\x1b[2m) in the normal foreground.
 hl = tempfile.mkdtemp(prefix="ted-smoke-hl-")
 SRC = 'fn main() { let s = "hi"; } // note\n'
 
@@ -309,11 +309,12 @@ try:
     out, ok = open_and_quit(rs)
     check("rs: keyword is magenta", b"\x1b[38;5;13mfn" in out, out[:300])
     check("rs: string is green", b'\x1b[38;5;10m"hi"' in out, out[:300])
-    check("rs: comment is dark grey", b"\x1b[38;5;8m// note" in out, out[:300])
+    check("rs: comment is dim", b"\x1b[2m// note" in out, out[:300])
     check("rs session exits 0", ok)
     out, ok = open_and_quit(txt)
     check("txt: text is shown", b'fn main() { let s = "hi"; } // note' in out, out[:300])
     check("txt: no syntax colors", b"\x1b[38;5;" not in out, out[:300])
+    check("txt: nothing dim", b"\x1b[2m" not in out, out[:300])
     check("txt session exits 0", ok)
 finally:
     shutil.rmtree(hl, ignore_errors=True)

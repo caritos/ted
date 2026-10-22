@@ -478,7 +478,8 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 /// The editor's frame as a `Screen`: consecutive chars of one style share a
-/// span, so a plain row is exactly one `Normal` span.
+/// span, so a plain row is one `Normal` span, or a `LineNo` gutter span
+/// followed by one `Normal` span when line numbers are on.
 fn editor_screen(view: View) -> Screen {
     Screen {
         rows: view.lines.iter().zip(&view.styles).map(|(text, styles)| spans(text, styles)).collect(),

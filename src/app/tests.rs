@@ -327,8 +327,8 @@ fn screen_of_editor_matches_editor_view_text() {
 
     let rows: Vec<String> = (0..screen.rows.len()).map(|i| row_text(&screen, i)).collect();
     assert_eq!(rows, view.lines);
-    // Gutter (LineNo) span, then the text: a plain file has no other styles.
-    assert!(screen.rows[..2].iter().all(|r| r.len() == 2 && r[0].style == Style::LineNo && r[1].style == Style::Normal));
+    // Every row: gutter (LineNo) span, then the text; a plain file has no other styles.
+    assert!(screen.rows.iter().all(|r| r.len() == 2 && r[0].style == Style::LineNo && r[1].style == Style::Normal));
     assert_eq!(screen.status, view.status);
     assert_eq!(screen.message, view.message);
     assert_eq!(screen.cursor, Some(view.cursor));
@@ -773,7 +773,10 @@ fn app_groups_equal_styles_into_spans_and_keeps_text_identical() {
         screen.rows[1],
         vec![Span { text: "  2 ".into(), style: Style::LineNo }, Span { text: "plain".into(), style: Style::Normal }]
     );
-    assert_eq!(row_text(&screen, 3).trim(), "~");
+    assert_eq!(
+        screen.rows[3],
+        vec![Span { text: "    ".into(), style: Style::LineNo }, Span { text: "~".into(), style: Style::Normal }]
+    );
 }
 
 #[test]

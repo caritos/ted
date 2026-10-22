@@ -28,7 +28,7 @@ Press Ctrl-G in the editor to open a read-only git view: changed files on the le
 |---|---|
 | Up / Down | Select a file |
 | PageUp / PageDown | Scroll the diff |
-| Enter | Open the selected file in the editor (refused with a message if the current buffer has unsaved changes) |
+| Enter | Open the selected file in a buffer (switches to it if already open) |
 | `r` | Reset the baseline to the current `HEAD` |
 | `b` | Pick a recent commit as the baseline (Enter picks, Esc closes) |
 | `q` / Esc / Ctrl-G | Back to the editor (closes the commit picker first if open) |
@@ -47,7 +47,7 @@ Press Ctrl-T in the editor to open a read-only file tree rooted at the same dire
 | Home / End | First / last row |
 | Right | Expand a directory (on an expanded one, move to its first child) |
 | Left | Collapse a directory (on a file or collapsed one, select the parent) |
-| Enter | Toggle a directory; open a file in the editor (refused with a message for unsaved changes, a FIFO, socket or device, or a file over 64 MiB) |
+| Enter | Toggle a directory; open a file in a buffer (refused with a message for a FIFO, socket, device or a file over 64 MiB) |
 | `q` / Esc / Ctrl-T | Back to the editor |
 | Ctrl-G | Jump to the changes view (and Ctrl-T in that view jumps to the tree) |
 
@@ -66,8 +66,25 @@ Files ending in `.rs` are drawn with colors from the terminal's ANSI palette, so
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |
 | Ctrl-T | Open the file tree (again: back to the editor) |
-| Ctrl-S | Save |
-| Ctrl-Q | Quit. With unsaved changes it warns first; press Ctrl-Q again to quit without saving. Any other key cancels the warning |
+| Ctrl-O | Open the buffer list (works from the git view and file tree too) |
+| Ctrl-N / Ctrl-P | Next / previous buffer, wrapping around (also leaves the git view, tree or list) |
+| Ctrl-W | Close the current buffer. A modified one warns first; press Ctrl-W again to close it without saving, any other key cancels. Closing the last buffer leaves one empty unnamed buffer. Ignored in the git view, tree and list |
+| Ctrl-S | Save the current buffer only |
+| Ctrl-Q | Quit. If any buffer has unsaved changes it warns ("Unsaved changes in N buffers!"); press Ctrl-Q again to quit without saving. Any other key cancels the warning |
+
+## Buffers
+
+`ted` holds several files at once. Opening a file from the git view or file tree adds a buffer and switches to it, so unsaved edits in the buffer you were in are never lost or refused. Opening a file that is already open (same file after resolving `./x` and symlinks) switches to it instead of adding a second copy. An unnamed, empty, unmodified buffer is replaced by the first file opened. When more than one buffer is open the status bar shows `[2/3]` after the file name.
+
+Ctrl-O opens the buffer list: one row per buffer (`  1  a.txt`, the current one marked with `>`, ` [+]` when modified), with the selection starting on the current buffer.
+
+| Key (buffer list) | Action |
+|---|---|
+| Up / Down | Move the selection |
+| Home / End | First / last buffer |
+| Enter | Switch to the selected buffer and return to the editor |
+| `q` / Esc / Ctrl-O | Back to the editor |
+| Ctrl-G / Ctrl-T | Jump to the git view / file tree |
 
 The bottom of the screen shows a status bar (file name, `[+]` when modified, `line:column`) and a message row (for example "Saved 3 lines", or "Save failed: ...").
 
@@ -81,13 +98,15 @@ Very small windows (fewer than 3 rows, or 0 columns) show only what fits, and ne
 
 ```
 src/buffer.rs    Rope-backed text, cursor, load and atomic save. No terminal code.
-src/editor.rs    Key handling, scrolling, status and messages, quit confirmation.
+src/editor.rs    Key handling, scrolling, status and messages.
                  Editor::view(width, height) returns a plain View value to draw.
 src/git.rs       Read-only `git` CLI wrapper behind a trait (status, diff, log).
 src/gitview.rs   Git view state: file list, selection, diff scroll, commit picker.
 src/text.rs      Shared text helpers (width fitting, truncation).
 src/filetree.rs  Read-only file tree state: expansion, selection, rendering.
-src/app.rs       Owns the editor, git view and file tree; switches between them.
+src/bufferlist.rs Buffer list state (selection, keys) and rendering.
+src/app.rs       Owns the buffers (one Editor each), git view, file tree and buffer
+                 list; switches between them; Ctrl-N/P/O/W/Q.
 src/screen.rs    Plain Screen value both modes render to.
 src/highlight.rs Rust tokenizer: classifies each char of a line (std only).
 src/main.rs      Thin crossterm layer: raw mode, read keys, draw the View,
@@ -97,7 +116,7 @@ scripts/pty_smoke.py   Drives the release binary through a pseudo-terminal.
 
 Dependencies: `crossterm` (terminal input and output) and `ropey` (text storage). There is no `ratatui` on purpose; the editor draws its own screen.
 
-Design rule: all logic lives in the library (`buffer`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`, `screen`, `highlight`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
+Design rule: all logic lives in the library (`buffer`, `bufferlist`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`, `screen`, `highlight`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
 
 Known simplifications:
 - Columns count Rust `char`s, not display cells, so emoji and CJK characters misalign the cursor.
@@ -106,16 +125,16 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 246 unit tests
+cargo test                                   # 284 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
 
-The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dim sequences, and that a `.txt` file with identical text has no color or dim sequences. The last one opens a `.txt` file containing `ESC[31mRED ESC[2J END` and checks that neither sequence reaches the terminal (apart from ted's own clear on entering the alternate screen) and that `?[31mRED` and `END` are drawn. That is 52 checks in total (27 before the tree, 12 for the tree, 8 for highlighting, 5 for escape sequences).
+The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dim sequences, and that a `.txt` file with identical text has no color or dim sequences. The last one opens a `.txt` file containing `ESC[31mRED ESC[2J END` and checks that neither sequence reaches the terminal (apart from ted's own clear on entering the alternate screen) and that `?[31mRED` and `END` are drawn. A final scenario opens `a.txt` and `b.txt` through the tree, checks `[2/2]`, edits the first, checks the Ctrl-O list (names, `[+]`, `>` marker), Enter back, the Ctrl-W warning, the Ctrl-Q warning with `1 buffer`, and a second Ctrl-Q exiting 0. That is 62 checks in total (27 before the tree, 12 for the tree, 8 for highlighting, 5 for escape sequences, 10 for buffers).
 
-The file tree's Ctrl-G / Ctrl-T cross-switching, its once-a-second refresh, the `(cannot read)` row and rooting for `ted <file>` are covered by unit tests only, not by the pty run.
+The buffer commands not in that scenario (Ctrl-N / Ctrl-P wrapping, closing, opening an already-open file, Ctrl-O from the git view or tree, list scrolling, tiny windows) are covered by unit tests only. The file tree's Ctrl-G / Ctrl-T cross-switching, its once-a-second refresh, the `(cannot read)` row and rooting for `ted <file>` are covered by unit tests only, not by the pty run.
 
-Verified by hand in a real terminal: save, quit, add text, delete text. Unit tests and the pty test do not prove look and feel, window resizing, Option/Alt keys, the git view's live refresh while another process edits files, its colors, or its behavior in a very large repo; the highlighting colors on a real terminal, and their readability in your theme (including dim comments) are also unchecked; likewise the file tree's colors, resize, live refresh while another process changes files, Ctrl-G / Ctrl-T cross-switching, a very large directory and symlinked directories; those are still unchecked.
+Verified by hand in a real terminal: save, quit, add text, delete text. Unit tests and the pty test do not prove look and feel, window resizing, Option/Alt keys, the git view's live refresh while another process edits files, its colors, or its behavior in a very large repo; the highlighting colors on a real terminal, and their readability in your theme (including dim comments) are also unchecked; likewise the buffer list's look, scrolling and resize, switching buffers by hand, and the file tree's colors, resize, live refresh while another process changes files, Ctrl-G / Ctrl-T cross-switching, a very large directory and symlinked directories; those are still unchecked.
 
 ## Not yet
 

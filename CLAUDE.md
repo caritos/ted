@@ -4,12 +4,13 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 
 ## Layout
 - `src/buffer.rs` - rope-backed text + cursor + file load/atomic save; records the lowest edited row (`take_dirty_row`) for the highlight cache. No terminal code.
-- `src/editor.rs` - key handling, scrolling, status/message, quit confirmation. `Editor::view()` returns a pure `View`.
+- `src/editor.rs` - key handling, scrolling, status/message (plus a `[i/n]` tag set by the app). `Editor::view()` returns a pure `View`.
 - `src/git.rs` - runs the `git` CLI (read-only) behind a `Git` trait: status, diff, log, baseline. No terminal code.
 - `src/gitview.rs` - git view state machine: file list, selection by path, diff scroll, commit picker, refresh.
 - `src/text.rs` - shared text helpers (width fitting, truncation, `sanitize`) used by the views. Every string drawn (editor rows, status, message; git view; file tree) maps control chars to `?` one-for-one; in the editor that happens in `editor.rs`'s private `clip`, the only builder of `View` strings.
 - `src/filetree.rs` - read-only file tree state (expansion, selection, refresh, rendering to rows). No terminal code.
-- `src/app.rs` - owns the `Editor`, the optional git view and file tree (`Mode` enum); Ctrl-G / Ctrl-T / `q` switch modes.
+- `src/bufferlist.rs` - buffer list state (selection, `ListAction`) and rendering to `Screen`. No terminal code.
+- `src/app.rs` - owns the open buffers (`editors` + `current`, one `Editor` each), the optional git view, file tree and buffer list (`Mode` enum); Ctrl-G / Ctrl-T / Ctrl-O / `q` switch modes, Ctrl-N/P cycle buffers, Ctrl-W closes (`close_armed`), Ctrl-Q quits (`quit_armed`, counts every modified buffer). Opening a file adds or switches to a buffer.
 - `src/screen.rs` - plain `Screen` value (rows of styled spans) that both modes render to; `Style` includes the syntax styles.
 - `src/highlight.rs` - Rust tokenizer (std only, char-based), chosen by file extension; `Editor::view` fills per-char styles from it, caching the `LineState` at the start of each line (cut back at the buffer's dirty row, cleared on `Editor::load` or a language change).
 - `src/main.rs` - thin crossterm layer only: raw mode, read keys, draw the `View`. Keep logic out of it.
@@ -23,10 +24,15 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Rust comes from rustup via Homebrew; if `cargo` is missing, `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`.
 
 ## Rules
-- TDD: failing test first. Logic goes in the library (`buffer`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`, `screen`, `highlight`) so it is testable without a terminal.
+- TDD: failing test first. Logic goes in the library (`buffer`, `bufferlist`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`, `screen`, `highlight`) so it is testable without a terminal.
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-22 (multiple buffers)
+- Done (unit-tested, 284 tests in total): `App` holds several `Editor`s; opening from the tree or git view adds or switches (same canonical file = one buffer; a lone pristine unnamed buffer is replaced); Ctrl-N/Ctrl-P cycle with wrap; Ctrl-W closes with a two-press warning on a modified buffer; Ctrl-Q warns with the count of modified buffers across all; status shows `[i/n]` when more than one is open; `bufferlist.rs` + `Mode::Buffers` via Ctrl-O (selection starts on the current buffer, Enter switches, `q`/Esc/Ctrl-O back, Ctrl-G/Ctrl-T jump, Ctrl-W ignored, Ctrl-Q warning shown in the list, 0..=6 x 0..=6 size sweep, hostile names sanitized).
+- Done (pty smoke, 62 checks, 10 new): open a.txt and b.txt via the tree (`[2/2]`), edit the first (`[1/2]`, `[+]`), Ctrl-O list with both names, `[+]` and `>`, Enter back, Ctrl-W warning, Ctrl-Q warning with `1 buffer`, second Ctrl-Q exits 0. Seen failing (4 checks) with the Ctrl-O handler stubbed out, then restored. Ctrl-N/P, closing, same-file switching and Ctrl-O from the views are unit-tested only.
+- Not yet verified by hand: how the list and the `[i/n]` tag look and feel on a real terminal, resize inside the list, a very long file name or many buffers (scrolling is unit-tested), colors of the selected row.
+- Deferred: closing or saving from the buffer list, jumping by number, reopening closed buffers, reload-on-disk-change for open buffers.
 ### 2026-10-22 (file tree)
 - Done (unit-tested): `FileTree` state machine (expand/collapse, selection, Enter/Left/Right, PageUp/Down, Home/End, unreadable dirs, refresh), rendering with `Style::Dir`, `App` Mode enum with Ctrl-T / Ctrl-G cross-switching.
 - Done (pty smoke, 12 of the 39 checks; cross-switching, refresh, `(cannot read)` and `ted <file>` rooting are unit-tested only): Ctrl-T lists entries and a dotfile, Right expands `sub/`, Enter opens `top.txt`, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. Seen failing with the Ctrl-T handler stubbed out.

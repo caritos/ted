@@ -338,6 +338,67 @@ try:
 finally:
     shutil.rmtree(esc, ignore_errors=True)
 
+# 13. several buffers: open a.txt and b.txt through the tree, edit a.txt, list
+# the buffers with Ctrl-O, close warning (Ctrl-W), quit warning (Ctrl-Q).
+CTRL_O, CTRL_P, CTRL_W = b"\x0f", b"\x10", b"\x17"
+bufs = tempfile.mkdtemp(prefix="ted-smoke-bufs-")
+pid = fd = None
+try:
+    for name in ("a.txt", "b.txt"):
+        with open(os.path.join(bufs, name), "w") as f:
+            f.write(name + " body\n")
+    pid, fd = spawn([bufs])
+    drain(fd)
+    send(fd, CTRL_T)
+    drain(fd)
+    send(fd, b"\r")  # a.txt (first row)
+    drain(fd)
+    send(fd, CTRL_T)
+    drain(fd)
+    send(fd, b"\x1b[B")
+    send(fd, b"\r")  # b.txt
+    out = drain(fd, 0.5, 2.0)
+    check("buffers: second file is open", b"b.txt body" in out, out[-300:])
+    check("buffers: status shows [2/2]", b"[2/2]" in out, out[-300:])
+    send(fd, CTRL_P)
+    drain(fd)
+    send(fd, b"X")
+    out = drain(fd, 0.5, 2.0)
+    check("buffers: edit in first shows [1/2] and [+]", b"[1/2]" in out and b"[+]" in out, out[-300:])
+    send(fd, CTRL_O)
+    out = drain(fd, 0.5, 2.0)
+    check("buffers: Ctrl-O shows the list", b"Buffers: 2 buffers" in out, out[-300:])
+    check("buffers: list has both names", b"a.txt [+]" in out and b"b.txt" in out, out[-300:])
+    check("buffers: current is marked", b"> 1  a.txt" in out, out[-300:])
+    send(fd, b"\r")
+    out = drain(fd, 0.5, 2.0)
+    check("buffers: Enter returns to the editor", b"Buffers:" not in out and b"Xa.txt body" in out, out[-300:])
+    send(fd, CTRL_W)
+    out = drain(fd, 0.5, 2.0)
+    check("buffers: Ctrl-W warns on the modified buffer", b"Press Ctrl-W again" in out, out[-300:])
+    send(fd, CTRL_Q)
+    out = drain(fd, 0.5, 2.0)
+    check("buffers: Ctrl-Q warns with 1 buffer", b"Unsaved changes in 1 buffer!" in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("buffers: second Ctrl-Q exits 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(bufs, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

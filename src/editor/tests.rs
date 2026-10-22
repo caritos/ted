@@ -227,3 +227,37 @@ fn view_survives_tiny_terminals() {
         assert!(v.lines.len() <= h);
     }
 }
+
+#[test]
+fn editor_load_replaces_buffer_and_resets_scroll() {
+    let text: Vec<String> = (0..10).map(|i| format!("line{i}")).collect();
+    let mut e = Editor::new(Buffer::from_text(&text.join("\n")));
+    for _ in 0..9 {
+        e.handle_key(key(KeyCode::Down));
+    }
+    for _ in 0..4 {
+        e.handle_key(key(KeyCode::Right));
+    }
+    e.view(3, 5); // scrolled down and right
+    e.handle_key(key(KeyCode::Char('x')));
+    e.handle_key(ctrl('q')); // arms the quit warning
+
+    e.load(Buffer::from_text("new\ntext"));
+    assert_eq!(e.buffer().text(), "new\ntext");
+    assert!(!e.buffer().is_modified());
+    assert_eq!(e.message(), "");
+    let v = e.view(3, 5);
+    assert_eq!(v.lines, vec!["new", "tex", "~"]);
+    assert_eq!(v.cursor, (0, 0));
+}
+
+#[test]
+fn cancel_quit_disarms_the_warning() {
+    let mut e = empty();
+    type_str(&mut e, "x");
+    e.handle_key(ctrl('q'));
+    e.cancel_quit();
+    assert_eq!(e.message(), "");
+    assert_eq!(e.handle_key(ctrl('q')), Flow::Continue);
+    assert_eq!(e.handle_key(ctrl('q')), Flow::Quit);
+}

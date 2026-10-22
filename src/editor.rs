@@ -48,6 +48,24 @@ impl Editor {
         &self.message
     }
 
+    /// Replaces the buffer and starts it fresh: top-left scroll, no message,
+    /// no pending quit warning.
+    pub fn load(&mut self, buffer: Buffer) {
+        self.buffer = buffer;
+        self.message.clear();
+        self.quit_armed = false;
+        self.scroll_row = 0;
+        self.scroll_col = 0;
+    }
+
+    /// Drops a pending Ctrl-Q warning and its message, as any other editor
+    /// key would. Other messages are kept.
+    pub fn cancel_quit(&mut self) {
+        if std::mem::take(&mut self.quit_armed) {
+            self.message.clear();
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> Flow {
         let quit_was_armed = std::mem::take(&mut self.quit_armed);
         self.message.clear();

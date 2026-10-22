@@ -91,6 +91,11 @@ impl GitView {
         &self.message
     }
 
+    /// Shows `message` until the next key.
+    pub fn set_message(&mut self, message: String) {
+        self.message = message;
+    }
+
     /// Reloads the file list and the selected file's diff.
     pub fn refresh(&mut self, git: &dyn Git, now: SystemTime) {
         let base = match self.current_baseline(git) {

@@ -632,3 +632,14 @@ fn render_with_unicode_paths_clips_by_char_not_byte() {
     let screen = render_git(&git, 24, 6);
     assert!(row_text(&screen.rows[0]).starts_with("M \u{65e5}\u{672c}"));
 }
+
+#[test]
+fn set_message_shows_until_next_key() {
+    let git = two_files();
+    let mut view = refreshed(&git);
+    view.set_message("Unsaved changes: save or quit first".to_string());
+    assert_eq!(view.message(), "Unsaved changes: save or quit first");
+    assert_eq!(view.render(60, 6, t(1000)).message, "Unsaved changes: save or quit first");
+    view.handle_key(key(KeyCode::Down), &git, t(1000));
+    assert_eq!(view.message(), "");
+}

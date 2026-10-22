@@ -1069,3 +1069,88 @@ fn ctrl_w_is_ignored_in_file_tree_and_git_view() {
     assert!(app.in_git_view());
     assert_eq!(app.buffer_count(), 3);
 }
+
+// ---- Ctrl-Q checks every buffer ----
+
+fn quit_message(app: &mut App) -> String {
+    app.screen(120, 6, t(1000)).message
+}
+
+/// Three buffers (a, b, c), current is c, with the listed ones edited.
+fn dirty_buffers(dir: &Temp, modified: &[usize]) -> App {
+    let mut app = three_buffers(dir);
+    for &i in modified {
+        while app.current_index() != i {
+            app.handle_key(ctrl('n'), t(1000));
+        }
+        type_str(&mut app, "X");
+    }
+    while app.current_index() != 2 {
+        app.handle_key(ctrl('n'), t(1000));
+    }
+    app
+}
+
+#[test]
+fn ctrl_q_quits_at_once_when_no_buffer_is_modified() {
+    let dir = Temp::new("quit-clean");
+    let mut app = three_buffers(&dir);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+}
+
+#[test]
+fn ctrl_q_warns_about_a_modified_buffer_that_is_not_current() {
+    let dir = Temp::new("quit-other");
+    let mut app = dirty_buffers(&dir, &[0]);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    let m = quit_message(&mut app);
+    assert_eq!(m, "Unsaved changes in 1 buffer! Press Ctrl-Q again to quit without saving.");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+}
+
+#[test]
+fn ctrl_q_counts_every_modified_buffer() {
+    let dir = Temp::new("quit-two");
+    let mut app = dirty_buffers(&dir, &[0, 2]);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    let m = quit_message(&mut app);
+    assert_eq!(m, "Unsaved changes in 2 buffers! Press Ctrl-Q again to quit without saving.");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+}
+
+#[test]
+fn any_other_key_cancels_the_quit_warning_and_clears_it() {
+    let dir = Temp::new("quit-cancel");
+    for k in [ctrl('n'), ctrl('p'), ctrl('g'), ctrl('t'), ctrl('w'), key(KeyCode::Left)] {
+        let mut app = dirty_buffers(&dir, &[0]);
+        assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+        app.handle_key(k, t(1000));
+        let m = quit_message(&mut app);
+        assert!(!m.contains("quit without saving"), "{k:?}: {m}");
+        assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue, "{k:?}");
+    }
+}
+
+#[test]
+fn quit_warning_shows_in_views_and_second_ctrl_q_quits_there() {
+    let dir = Temp::new("quit-views");
+    for view in ['g', 't'] {
+        let mut app = dirty_buffers(&dir, &[0]);
+        app.handle_key(ctrl(view), t(1000));
+        assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+        let m = quit_message(&mut app);
+        assert!(m.contains("1 buffer!"), "{m}");
+        assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+    }
+}
+
+#[test]
+fn ctrl_q_then_ctrl_w_then_ctrl_q_does_not_quit() {
+    let dir = Temp::new("quit-close");
+    let mut app = dirty_buffers(&dir, &[2]);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(quit_message(&mut app), CLOSE_WARNING);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    assert_eq!(app.buffer_count(), 3);
+}

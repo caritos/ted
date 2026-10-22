@@ -39,11 +39,13 @@ pub struct App {
     mode: Mode,
     /// Ctrl-W warned about a modified buffer; the next Ctrl-W closes it.
     close_armed: bool,
+    /// Ctrl-Q warned about modified buffers; the next Ctrl-Q quits.
+    quit_armed: bool,
 }
 
 impl App {
     pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
-        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, mode: Mode::Editor, close_armed: false }
+        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, mode: Mode::Editor, close_armed: false, quit_armed: false }
     }
 
     pub fn in_git_view(&self) -> bool {
@@ -71,9 +73,8 @@ impl App {
     }
 
     /// Switches to the next (`forward`) or previous buffer, wrapping, and
-    /// returns to the editor. The key cancels a pending quit warning.
+    /// returns to the editor.
     fn cycle(&mut self, forward: bool) {
-        self.editor_mut().cancel_quit();
         let n = self.editors.len();
         self.current = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
         self.mode = Mode::Editor;
@@ -97,8 +98,35 @@ impl App {
         self.current = self.current.saturating_sub(1);
     }
 
+    /// Quits at once when no buffer is modified; otherwise warns, and a
+    /// second Ctrl-Q (with no other key between) quits.
+    fn quit(&mut self) -> Flow {
+        let modified = self.editors.iter().filter(|e| e.buffer().is_modified()).count();
+        if modified == 0 || self.quit_armed {
+            return Flow::Quit;
+        }
+        self.quit_armed = true;
+        let noun = if modified == 1 { "buffer" } else { "buffers" };
+        let message =
+            format!("Unsaved changes in {modified} {noun}! Press Ctrl-Q again to quit without saving.");
+        match self.mode {
+            Mode::Editor => self.editor_mut().set_message(message),
+            _ => self.set_view_message(message),
+        }
+        Flow::Continue
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent, now: SystemTime) -> Flow {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let is_quit = ctrl && key.code == KeyCode::Char('q');
+        // Any key but Ctrl-Q withdraws a pending quit warning.
+        if !is_quit && std::mem::take(&mut self.quit_armed) {
+            self.editor_mut().set_message(String::new());
+            self.set_view_message(String::new());
+        }
+        if is_quit {
+            return self.quit();
+        }
         let is_close = ctrl && key.code == KeyCode::Char('w');
         // Any key but Ctrl-W withdraws a pending close warning.
         if !is_close && std::mem::take(&mut self.close_armed) {
@@ -125,15 +153,6 @@ impl App {
             }
             return self.editor_mut().handle_key(key);
         }
-
-        // Ctrl-Q follows the editor's quit rules; its warning shows here.
-        if ctrl && key.code == KeyCode::Char('q') {
-            let flow = self.editor_mut().handle_key(key);
-            self.set_view_message(self.editor().message().to_string());
-            return flow;
-        }
-        // Any other key cancels a pending quit warning, as in the editor.
-        self.editor_mut().cancel_quit();
 
         match self.mode {
             Mode::Editor => {}
@@ -194,16 +213,12 @@ impl App {
     }
 
     fn enter_git_view(&mut self, now: SystemTime) {
-        // Ctrl-G is a key like any other: it cancels a pending quit warning.
-        self.editor_mut().cancel_quit();
         let view = self.git_view.get_or_insert_with(GitView::new);
         view.refresh(self.git.as_ref(), now);
         self.mode = Mode::GitView;
     }
 
     fn enter_file_tree(&mut self) {
-        // Ctrl-T is a key like any other: it cancels a pending quit warning.
-        self.editor_mut().cancel_quit();
         match &mut self.file_tree {
             Some(tree) => tree.refresh(),
             // `new` lists the root, so a fresh tree needs no extra refresh.
@@ -250,7 +265,6 @@ impl App {
                 .iter()
                 .position(|e| e.buffer().path().is_some_and(|p| same_file(p, path)));
             if let Some(i) = found {
-                self.editor_mut().cancel_quit();
                 self.current = i;
                 return;
             }
@@ -264,7 +278,6 @@ impl App {
             self.editors[0] = Editor::new(buffer);
             self.current = 0;
         } else {
-            self.editor_mut().cancel_quit();
             self.editors.push(Editor::new(buffer));
             self.current = self.editors.len() - 1;
         }

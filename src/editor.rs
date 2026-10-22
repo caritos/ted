@@ -30,7 +30,6 @@ pub struct View {
 pub struct Editor {
     buffer: Buffer,
     message: String,
-    quit_armed: bool,
     /// Extra status text after the name and `[+]` (e.g. `[2/3]`); empty is none.
     tag: String,
     scroll_row: usize,
@@ -50,7 +49,6 @@ impl Editor {
         Editor {
             buffer,
             message: String::new(),
-            quit_armed: false,
             tag: String::new(),
             scroll_row: 0,
             scroll_col: 0,
@@ -78,41 +76,23 @@ impl Editor {
     }
 
     /// Replaces the buffer and starts it fresh: top-left scroll, no message,
-    /// no pending quit warning, no highlight cache.
+    /// no highlight cache.
     pub fn load(&mut self, buffer: Buffer) {
         self.buffer = buffer;
         self.line_states = Vec::new();
         self.highlighted = None;
         self.message.clear();
-        self.quit_armed = false;
         self.scroll_row = 0;
         self.scroll_col = 0;
     }
 
-    /// Drops a pending Ctrl-Q warning and its message, as any other editor
-    /// key would. Other messages are kept.
-    pub fn cancel_quit(&mut self) {
-        if std::mem::take(&mut self.quit_armed) {
-            self.message.clear();
-        }
-    }
-
     pub fn handle_key(&mut self, key: KeyEvent) -> Flow {
-        let quit_was_armed = std::mem::take(&mut self.quit_armed);
         self.message.clear();
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Char('s') if ctrl => self.save(),
-            KeyCode::Char('q') if ctrl => {
-                if !self.buffer.is_modified() || quit_was_armed {
-                    return Flow::Quit;
-                }
-                self.message =
-                    "Unsaved changes! Press Ctrl-Q again to quit without saving.".to_string();
-                self.quit_armed = true;
-            }
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline(),
             KeyCode::Backspace => self.buffer.backspace(),

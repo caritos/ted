@@ -115,40 +115,6 @@ fn failed_save_reports_the_error() {
 }
 
 #[test]
-fn ctrl_q_quits_when_clean() {
-    let mut e = empty();
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Quit);
-}
-
-#[test]
-fn ctrl_q_warns_before_discarding_changes() {
-    let mut e = empty();
-    type_str(&mut e, "x");
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Continue);
-    assert!(e.message().contains("Unsaved"), "{}", e.message());
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Quit);
-}
-
-#[test]
-fn any_other_key_cancels_the_quit_warning() {
-    let mut e = empty();
-    type_str(&mut e, "x");
-    e.handle_key(ctrl('q'));
-    e.handle_key(key(KeyCode::Left));
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Continue);
-}
-
-#[test]
-fn saving_after_the_warning_lets_quit_through() {
-    let path = temp_file("saveq");
-    let mut e = Editor::new(Buffer::open(&path).unwrap());
-    type_str(&mut e, "x");
-    e.handle_key(ctrl('q'));
-    e.handle_key(ctrl('s'));
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Quit);
-}
-
-#[test]
 fn view_has_text_rows_status_and_message() {
     let mut e = Editor::new(Buffer::from_text("one\ntwo"));
     let v = e.view(20, 6);
@@ -241,7 +207,6 @@ fn editor_load_replaces_buffer_and_resets_scroll() {
     }
     e.view(3, 5); // scrolled down and right
     e.handle_key(key(KeyCode::Char('x')));
-    e.handle_key(ctrl('q')); // arms the quit warning
 
     e.load(Buffer::from_text("new\ntext"));
     assert_eq!(e.buffer().text(), "new\ntext");
@@ -250,17 +215,6 @@ fn editor_load_replaces_buffer_and_resets_scroll() {
     let v = e.view(3, 5);
     assert_eq!(v.lines, vec!["new", "tex", "~"]);
     assert_eq!(v.cursor, (0, 0));
-}
-
-#[test]
-fn cancel_quit_disarms_the_warning() {
-    let mut e = empty();
-    type_str(&mut e, "x");
-    e.handle_key(ctrl('q'));
-    e.cancel_quit();
-    assert_eq!(e.message(), "");
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Continue);
-    assert_eq!(e.handle_key(ctrl('q')), Flow::Quit);
 }
 
 fn named_editor(name: &str, text: &str) -> Editor {

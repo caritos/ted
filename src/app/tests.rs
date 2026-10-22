@@ -43,6 +43,7 @@ mod gutter;
 mod help;
 mod saveas;
 mod search;
+mod undo;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)

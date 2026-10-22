@@ -341,6 +341,8 @@ impl App {
             Command::Tree => self.enter_file_tree(),
             Command::Git => self.enter_git_view(now),
             Command::Help => self.enter_help(),
+            Command::Undo => self.editor_mut().undo(),
+            Command::Redo => self.editor_mut().redo(),
             Command::Quit => return self.quit(),
             Command::WriteQuit => {
                 self.editor_mut().save();

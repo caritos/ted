@@ -724,6 +724,52 @@ finally:
             pass
     shutil.rmtree(sp2, ignore_errors=True)
 
+# 21. undo / redo: Ctrl-Z removes the typed run in one step and clears `[+]`,
+# Ctrl-Y brings it back, extra Ctrl-Z/Ctrl-Y with nothing to do are harmless.
+CTRL_Z, CTRL_Y = b"\x1a", b"\x19"
+up = tempfile.mkdtemp(prefix="ted-smoke-undo-")
+pid = fd = None
+try:
+    p = os.path.join(up, "u.txt")
+    with open(p, "w") as f:
+        f.write("abc\n")
+    pid, fd = spawn([p])
+    drain(fd)
+    send(fd, b"XY")
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("undo: typing shows XYabc and [+]", b"XYabc" in out and b"[+]" in out, out[-300:])
+    send(fd, CTRL_Z)
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("undo: Ctrl-Z restores abc (one step)", b"  1 abc" in out and b"XY" not in out, out[-300:])
+    check("undo: [+] is gone", b"[+]" not in out, out[-300:])
+    send(fd, CTRL_Y)
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("undo: Ctrl-Y brings XYabc and [+] back", b"XYabc" in out and b"[+]" in out, out[-300:])
+    send(fd, CTRL_Z)
+    drain(fd)
+    send(fd, CTRL_Z)
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("undo: Ctrl-Z with nothing to undo is harmless", b"Nothing to undo" in out and b"abc" in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("undo: exit 0 (back at the saved text, no warning)", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(up, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

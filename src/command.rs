@@ -2,8 +2,8 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 12] = [
-    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "quit",
+pub const NAMES: [&str; 14] = [
+    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +19,8 @@ pub enum Command {
     Tree,
     Git,
     Help,
+    Undo,
+    Redo,
     Quit,
     WriteQuit,
 }
@@ -92,6 +94,8 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "tree" => plain(Command::Tree),
         "git" => plain(Command::Git),
         "help" => plain(Command::Help),
+        "undo" => plain(Command::Undo),
+        "redo" => plain(Command::Redo),
         "quit" => plain(Command::Quit),
         "wq" => plain(Command::WriteQuit),
         // The path keeps its case and inner spaces.
@@ -247,6 +251,20 @@ mod tests {
         assert_eq!(err("goto 000"), "Usage: goto <line>");
         assert_eq!(err("goto 1x"), "Usage: goto <line>");
         assert_eq!(err("goto +5"), "Usage: goto <line>");
+    }
+
+    #[test]
+    fn undo_and_redo_parse_without_arguments() {
+        assert_eq!(parse("undo"), Ok(Command::Undo));
+        assert_eq!(parse("redo"), Ok(Command::Redo));
+        assert_eq!(parse("u"), Ok(Command::Undo));
+        assert_eq!(parse("re"), Ok(Command::Redo));
+        assert_eq!(parse("r"), Ok(Command::Redo));
+        assert_eq!(err("undo 2"), "Usage: undo");
+        assert_eq!(err("redo now"), "Usage: redo");
+        assert_eq!(matches("u"), vec!["undo"]);
+        assert_eq!(complete("un"), "undo");
+        assert_eq!(complete("r"), "redo");
     }
 
     #[test]

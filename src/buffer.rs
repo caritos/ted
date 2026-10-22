@@ -13,7 +13,14 @@ pub struct Buffer {
     /// Column to return to when moving vertically across shorter lines.
     goal_col: usize,
     path: Option<PathBuf>,
-    modified: bool,
+    /// Applied edits, oldest first; its length is the history position.
+    undo: Vec<Edit>,
+    /// Undone edits, the next one to redo last.
+    redo: Vec<Edit>,
+    /// History position at the last open or save; `None` once unreachable.
+    clean: Option<usize>,
+    /// Whether the next typing/deleting edit may merge into the last one.
+    merge_ok: bool,
     /// Lowest row whose text changed since the last `take_dirty_row`.
     dirty_row: Option<usize>,
 }
@@ -36,7 +43,10 @@ impl Buffer {
             col: 0,
             goal_col: 0,
             path: None,
-            modified: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            clean: Some(0),
+            merge_ok: false,
             dirty_row: Some(0),
         }
     }
@@ -61,7 +71,7 @@ impl Buffer {
             .clone()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
         write_atomic(&path, &self.text())?;
-        self.modified = false;
+        self.mark_clean();
         Ok(())
     }
 
@@ -70,7 +80,7 @@ impl Buffer {
     pub fn save_as(&mut self, path: PathBuf) -> io::Result<()> {
         write_new(&path, &self.text())?;
         self.path = Some(path);
-        self.modified = false;
+        self.mark_clean();
         Ok(())
     }
 
@@ -98,10 +108,76 @@ impl Buffer {
         self.path.as_deref()
     }
 
-    /// True after any edit since the last open or save. There is no undo, so
-    /// typing and then deleting a character still counts as modified.
+    /// True when the history position differs from the one at the last open or
+    /// save, so typing and then undoing it is unmodified again. After a new
+    /// edit cuts off (or the cap drops) the saved state it stays modified.
     pub fn is_modified(&self) -> bool {
-        self.modified
+        self.clean != Some(self.undo.len())
+    }
+
+    fn mark_clean(&mut self) {
+        self.clean = Some(self.undo.len());
+        self.merge_ok = false;
+    }
+
+    /// Undoes the last edit step. False when there is nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        let Some(edit) = self.undo.pop() else { return false };
+        self.apply(edit.index, edit.inserted.chars().count(), &edit.removed);
+        self.place_cursor(edit.before);
+        self.goal_col = self.col;
+        self.redo.push(edit);
+        self.merge_ok = false;
+        true
+    }
+
+    /// Redoes the last undone step. False when there is nothing to redo.
+    pub fn redo(&mut self) -> bool {
+        let Some(edit) = self.redo.pop() else { return false };
+        self.apply(edit.index, edit.removed.chars().count(), &edit.inserted);
+        self.place_cursor(edit.after);
+        self.goal_col = self.col;
+        self.undo.push(edit);
+        self.merge_ok = false;
+        true
+    }
+
+    /// Replaces `remove_len` chars at `index` with `insert`, marking every row
+    /// that may have changed (one above when line breaks are involved).
+    fn apply(&mut self, index: usize, remove_len: usize, insert: &str) {
+        let removed: Vec<char> = self.rope.slice(index..index + remove_len).chars().collect();
+        let breaks = removed.iter().chain(insert.chars().collect::<Vec<_>>().iter()).any(|&c| is_break(c));
+        let before_row = self.rope.char_to_line(index);
+        self.rope.remove(index..index + remove_len);
+        self.rope.insert(index, insert);
+        let after_row = self.rope.char_to_line(index.min(self.rope.len_chars()));
+        let row = before_row.min(after_row);
+        self.mark_dirty(if breaks { row.saturating_sub(1) } else { row });
+    }
+
+    /// Records a performed edit: merges it into the last step when the merge
+    /// rules allow, otherwise pushes a new step. Clears the redo branch.
+    fn record(&mut self, edit: Edit) {
+        if !self.redo.is_empty() {
+            if self.clean.is_some_and(|c| c > self.undo.len()) {
+                self.clean = None;
+            }
+            self.redo.clear();
+        }
+        let len = self.undo.len();
+        if self.merge_ok
+            && self.clean != Some(len)
+            && let Some(last) = self.undo.last_mut()
+            && last.merge(&edit)
+        {
+            return;
+        }
+        self.undo.push(edit);
+        if self.undo.len() > MAX_EDITS {
+            self.undo.remove(0);
+            self.clean = self.clean.and_then(|c| c.checked_sub(1));
+        }
+        self.merge_ok = true;
     }
 
     /// The lowest row changed since the last call (a new buffer counts as
@@ -118,10 +194,11 @@ impl Buffer {
 
     pub fn insert_char(&mut self, c: char) {
         self.mark_dirty(self.row);
-        self.rope.insert_char(self.cursor_index(), c);
+        let index = self.cursor_index();
+        self.rope.insert_char(index, c);
         self.col += 1;
         self.goal_col = self.col;
-        self.modified = true;
+        self.record(Edit::new(index, "", &c.to_string(), index, index + 1));
     }
 
     pub fn insert_newline(&mut self) {
@@ -133,7 +210,7 @@ impl Buffer {
         // row cannot simply be incremented.
         self.place_cursor(index + 1);
         self.goal_col = self.col;
-        self.modified = true;
+        self.record(Edit::new(index, "", "\n", index, index + 1));
     }
 
     pub fn backspace(&mut self) {
@@ -141,20 +218,20 @@ impl Buffer {
         if index == 0 {
             return;
         }
-        if self.col > 0 {
+        let start = if self.col > 0 {
             self.mark_dirty(self.row);
-            self.rope.remove(index - 1..index);
-            self.place_cursor(index - 1);
+            index - 1
         } else {
             let prev = self.row - 1;
             // Joining with the line above: that row changes.
             self.mark_dirty(prev);
-            let break_len = break_len(self.rope.line(prev));
-            self.rope.remove(index - break_len..index);
-            self.place_cursor(index - break_len);
-        }
+            index - break_len(self.rope.line(prev))
+        };
+        let removed = self.rope.slice(start..index).to_string();
+        self.rope.remove(start..index);
+        self.place_cursor(start);
         self.goal_col = self.col;
-        self.modified = true;
+        self.record(Edit::new(start, &removed, "", index, start));
     }
 
     pub fn delete(&mut self) {
@@ -170,12 +247,14 @@ impl Buffer {
             self.mark_dirty(self.row.saturating_sub(1));
             index + break_len(self.rope.line(self.row))
         };
+        let removed = self.rope.slice(index..end).to_string();
         self.rope.remove(index..end);
         self.place_cursor(index);
-        self.modified = true;
+        self.record(Edit::new(index, &removed, "", index, index));
     }
 
     pub fn move_left(&mut self) {
+        self.merge_ok = false;
         if self.col > 0 {
             self.col -= 1;
         } else if self.row > 0 {
@@ -186,6 +265,7 @@ impl Buffer {
     }
 
     pub fn move_right(&mut self) {
+        self.merge_ok = false;
         if self.col < self.line_len(self.row) {
             self.col += 1;
         } else if self.row + 1 < self.line_count() {
@@ -196,6 +276,7 @@ impl Buffer {
     }
 
     pub fn move_up(&mut self) {
+        self.merge_ok = false;
         if self.row > 0 {
             self.row -= 1;
             self.col = self.goal_col.min(self.line_len(self.row));
@@ -203,6 +284,7 @@ impl Buffer {
     }
 
     pub fn move_down(&mut self) {
+        self.merge_ok = false;
         if self.row + 1 < self.line_count() {
             self.row += 1;
             self.col = self.goal_col.min(self.line_len(self.row));
@@ -218,23 +300,27 @@ impl Buffer {
     }
 
     pub fn move_home(&mut self) {
+        self.merge_ok = false;
         self.col = 0;
         self.goal_col = 0;
     }
 
     pub fn move_end(&mut self) {
+        self.merge_ok = false;
         self.col = self.line_len(self.row);
         self.goal_col = self.col;
     }
 
     /// Moves up `rows` lines (stopping at the first), keeping the goal column.
     pub fn move_up_by(&mut self, rows: usize) {
+        self.merge_ok = false;
         self.row = self.row.saturating_sub(rows);
         self.col = self.goal_col.min(self.line_len(self.row));
     }
 
     /// Moves down `rows` lines (stopping at the last), keeping the goal column.
     pub fn move_down_by(&mut self, rows: usize) {
+        self.merge_ok = false;
         self.row = (self.row + rows).min(self.line_count() - 1);
         self.col = self.goal_col.min(self.line_len(self.row));
     }
@@ -302,6 +388,7 @@ impl Buffer {
     /// Puts the cursor at the nearest valid position to (`row`, `col`).
     /// Not an edit: leaves the modified flag and dirty row alone.
     pub fn set_cursor(&mut self, row: usize, col: usize) {
+        self.merge_ok = false;
         self.row = row.min(self.line_count() - 1);
         self.col = col.min(self.line_len(self.row));
         self.goal_col = self.col;
@@ -321,6 +408,70 @@ impl Buffer {
         let line = self.rope.line(row);
         line.len_chars() - break_len(line)
     }
+}
+
+/// Most steps kept in the undo history; the oldest are dropped.
+const MAX_EDITS: usize = 10_000;
+
+/// One undoable step: at char `index`, `removed` was replaced by `inserted`.
+/// `before` / `after` are the cursor's char index around the step.
+#[derive(Debug)]
+struct Edit {
+    index: usize,
+    removed: String,
+    inserted: String,
+    before: usize,
+    after: usize,
+}
+
+impl Edit {
+    fn new(index: usize, removed: &str, inserted: &str, before: usize, after: usize) -> Self {
+        Edit { index, removed: removed.to_string(), inserted: inserted.to_string(), before, after }
+    }
+
+    /// Folds `next` (performed right after `self`) into `self` if both are
+    /// part of one run of typing, Backspaces or Deletes of non-break chars.
+    fn merge(&mut self, next: &Edit) -> bool {
+        let plain = |s: &str| !s.is_empty() && !s.chars().any(is_break);
+        let len = |s: &str| s.chars().count();
+        if self.after != next.before {
+            return false;
+        }
+        let typing = self.removed.is_empty()
+            && next.removed.is_empty()
+            && plain(&self.inserted)
+            && plain(&next.inserted)
+            && self.index + len(&self.inserted) == next.index;
+        if typing {
+            self.inserted.push_str(&next.inserted);
+            self.after = next.after;
+            return true;
+        }
+        let removals = self.inserted.is_empty()
+            && next.inserted.is_empty()
+            && plain(&self.removed)
+            && plain(&next.removed);
+        if !removals {
+            return false;
+        }
+        let back = |e: &Edit| e.before == e.index + len(&e.removed);
+        if back(self) && back(next) && next.index + len(&next.removed) == self.index {
+            self.removed.insert_str(0, &next.removed);
+            self.index = next.index;
+            self.after = next.after;
+            return true;
+        }
+        if self.before == self.index && next.before == next.index && next.index == self.index {
+            self.removed.push_str(&next.removed);
+            return true;
+        }
+        false
+    }
+}
+
+/// Whether `c` ends a line for ropey.
+fn is_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{0B}' | '\u{0C}' | '\u{85}' | '\u{2028}' | '\u{2029}')
 }
 
 /// Columns where `needle` (folded) starts in the text of `line` (its break
@@ -463,3 +614,5 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod undo_tests;

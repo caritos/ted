@@ -243,50 +243,47 @@ impl Buffer {
         forward: bool,
         include_from: bool,
     ) -> Option<Found> {
+        #[cfg(test)]
+        FINDS.with(|c| c.set(c.get() + 1));
         if query.is_empty() {
             return None;
         }
         let exact = query.chars().any(char::is_uppercase);
         let needle: Vec<char> = query.chars().map(|c| fold(c, exact)).collect();
         let rows = self.line_count();
-        let matches = |row: usize| -> Vec<usize> {
-            let hay: Vec<char> = self.line(row).chars().map(|c| fold(c, exact)).collect();
-            if hay.len() < needle.len() {
-                return Vec::new();
-            }
-            (0..=hay.len() - needle.len())
-                .filter(|&i| hay[i..i + needle.len()] == needle[..])
-                .collect()
-        };
+        // Both buffers are reused for every row, so a scan allocates once.
+        let mut scratch = Scratch::default();
+        let mut scan = |line: RopeSlice| -> Vec<usize> { row_matches(line, query, &needle, exact, &mut scratch).to_vec() };
         let found = |row: usize, col: usize, wrapped: bool| Some(Found { row, col, wrapped });
         let (from_row, from_col) = from;
+        let last = from_row.min(rows - 1);
+        // Each pass walks the rope's lines once instead of looking rows up.
         if forward {
-            for row in from_row..rows {
-                let hit = matches(row).into_iter().find(|&c| {
-                    row > from_row || c > from_col || (include_from && c == from_col)
-                });
+            for (i, line) in self.rope.lines_at(from_row.min(rows)).enumerate() {
+                let row = from_row + i;
+                let hit = scan(line)
+                    .into_iter()
+                    .find(|&c| row > from_row || c > from_col || (include_from && c == from_col));
                 if let Some(col) = hit {
                     return found(row, col, false);
                 }
             }
-            for row in 0..=from_row.min(rows - 1) {
-                if let Some(&col) = matches(row).first() {
+            for (row, line) in self.rope.lines().take(last + 1).enumerate() {
+                if let Some(&col) = scan(line).first() {
                     return found(row, col, true);
                 }
             }
         } else {
-            for row in (0..=from_row.min(rows - 1)).rev() {
-                let hit = matches(row)
-                    .into_iter()
-                    .rev()
-                    .find(|&c| row < from_row || c < from_col);
+            for (i, line) in self.rope.lines_at(last + 1).reversed().enumerate() {
+                let row = last - i;
+                let hit = scan(line).into_iter().rev().find(|&c| row < from_row || c < from_col);
                 if let Some(col) = hit {
                     return found(row, col, false);
                 }
             }
-            for row in (from_row.min(rows - 1)..rows).rev() {
-                if let Some(&col) = matches(row).last() {
-                    return found(row, col, true);
+            for (i, line) in self.rope.lines_at(rows).reversed().take(rows - last).enumerate() {
+                if let Some(&col) = scan(line).last() {
+                    return found(rows - 1 - i, col, true);
                 }
             }
         }
@@ -317,6 +314,48 @@ impl Buffer {
     }
 }
 
+/// Columns where `needle` (folded) starts in the text of `line` (its break
+/// excluded), ascending, left in `scratch`. An exact-case query first tests
+/// the line with a plain `contains` when the line is one contiguous chunk,
+/// which skips most rows without building any chars.
+fn row_matches<'a>(
+    line: RopeSlice,
+    query: &str,
+    needle: &[char],
+    exact: bool,
+    scratch: &'a mut Scratch,
+) -> &'a [usize] {
+    let Scratch { hay, cols } = scratch;
+    cols.clear();
+    let text = line.slice(..line.len_chars() - break_len(line));
+    if exact && text.as_str().is_some_and(|s| !s.contains(query)) {
+        return cols;
+    }
+    hay.clear();
+    match text.as_str() {
+        Some(s) => hay.extend(s.chars().map(|c| fold(c, exact))),
+        None => hay.extend(text.chars().map(|c| fold(c, exact))),
+    }
+    if let (Some(&first), true) = (needle.first(), hay.len() >= needle.len()) {
+        let last_start = hay.len() - needle.len();
+        cols.extend((0..=last_start).filter(|&i| hay[i] == first && hay[i..i + needle.len()] == *needle));
+    }
+    cols
+}
+
+/// Buffers a search reuses for every row.
+#[derive(Default)]
+struct Scratch {
+    hay: Vec<char>,
+    cols: Vec<usize>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Number of `Buffer::find` calls on this thread, for tests.
+    pub(crate) static FINDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A search match: `col` is a char index within the line text.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Found {
@@ -329,6 +368,8 @@ pub struct Found {
 fn fold(c: char, exact: bool) -> char {
     if exact {
         c
+    } else if c.is_ascii() {
+        c.to_ascii_lowercase()
     } else {
         c.to_lowercase().next().unwrap_or(c)
     }

@@ -151,6 +151,26 @@ fn single_match_next_lands_on_same_match() {
 }
 
 #[test]
+fn typing_more_after_not_found_does_not_search_again() {
+    let mut e = ed(&many_lines(50));
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "zzz");
+    assert_eq!(e.view(40, 6).message, "Find: zzz (not found)");
+    let before = crate::buffer::FINDS.with(|c| c.get());
+    type_str(&mut e, "abc");
+    assert_eq!(crate::buffer::FINDS.with(|c| c.get()), before);
+    assert_eq!(e.view(40, 6).message, "Find: zzzabc (not found)");
+    assert_eq!(e.buffer().cursor(), (0, 0));
+    // Backspace can create a match again, so it does search.
+    for _ in 0..6 {
+        e.handle_key(key(KeyCode::Backspace));
+    }
+    type_str(&mut e, "line 4");
+    assert_eq!(e.buffer().cursor(), (4, 0));
+    assert_eq!(e.view(40, 6).message, "Find: line 4_");
+}
+
+#[test]
 fn not_found_keeps_cursor_and_says_so() {
     let mut e = ed("abc");
     e.handle_key(ctrl('f'));

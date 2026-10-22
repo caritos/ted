@@ -210,8 +210,13 @@ impl Editor {
             }
             KeyCode::Char(c) if !ctrl && !alt => match prompt.kind {
                 PromptKind::Find => {
+                    // A longer query cannot match where its prefix did not
+                    // (also across the smart-case switch), so skip the scan.
+                    let hopeless = prompt.status == FindStatus::NotFound;
                     prompt.text.push(c);
-                    self.search_from_origin(&mut prompt);
+                    if !hopeless {
+                        self.search_from_origin(&mut prompt);
+                    }
                 }
                 PromptKind::Goto => {
                     if c.is_ascii_digit() {

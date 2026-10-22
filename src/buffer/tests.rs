@@ -555,3 +555,64 @@ fn go_to_line_is_one_based_and_clamped() {
     e.go_to_line(5);
     assert_eq!(e.cursor(), (0, 0));
 }
+
+/// Naive reference for `find`: every match listed, then the first or last
+/// one that qualifies, wrapping when none does.
+fn naive_find(b: &Buffer, query: &str, from: (usize, usize), forward: bool, include_from: bool) -> Option<Found> {
+    if query.is_empty() {
+        return None;
+    }
+    let exact = query.chars().any(char::is_uppercase);
+    let needle: Vec<char> = query.chars().map(|c| fold(c, exact)).collect();
+    let mut all = Vec::new();
+    for row in 0..b.line_count() {
+        let hay: Vec<char> = b.line(row).chars().map(|c| fold(c, exact)).collect();
+        for col in 0..hay.len() {
+            if hay[col..].starts_with(&needle) {
+                all.push((row, col));
+            }
+        }
+    }
+    let hit = if forward {
+        all.iter().copied().find(|&p| p > from || (include_from && p == from))
+    } else {
+        all.iter().copied().rev().find(|&p| p < from)
+    };
+    match hit {
+        Some((row, col)) => Some(Found { row, col, wrapped: false }),
+        None if forward => all.first().map(|&(row, col)| Found { row, col, wrapped: true }),
+        None => all.last().map(|&(row, col)| Found { row, col, wrapped: true }),
+    }
+}
+
+#[test]
+fn find_matches_a_naive_reference_on_random_text() {
+    let alphabet: Vec<char> = "aAbB \n\r\u{e9}\u{c9}x".chars().collect();
+    let mut seed = 12345u64;
+    let mut next = |n: usize| {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 33) as usize) % n
+    };
+    for _ in 0..300 {
+        let len = next(40);
+        let text: String = (0..len).map(|_| alphabet[next(alphabet.len())]).collect();
+        let b = Buffer::from_text(&text);
+        for _ in 0..12 {
+            let qlen = 1 + next(3);
+            let query: String = (0..qlen).map(|_| alphabet[next(alphabet.len())]).collect();
+            if query.contains(['\n', '\r']) {
+                continue;
+            }
+            let from = (next(b.line_count() + 1), next(6));
+            for forward in [true, false] {
+                for include_from in [true, false] {
+                    assert_eq!(
+                        b.find(&query, from, forward, include_from),
+                        naive_find(&b, &query, from, forward, include_from),
+                        "text {text:?} query {query:?} from {from:?} fwd {forward} incl {include_from}"
+                    );
+                }
+            }
+        }
+    }
+}

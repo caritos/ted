@@ -399,3 +399,159 @@ fn delete_that_joins_a_cr_and_lf_keeps_the_cursor_valid() {
     assert_eq!(b.text(), "a\r\nb");
     assert_cursor_valid(&mut b);
 }
+
+fn f(row: usize, col: usize, wrapped: bool) -> Found {
+    Found { row, col, wrapped }
+}
+
+#[test]
+fn find_forward_from_cursor_and_include_from() {
+    let b = Buffer::from_text("foo bar foo\nfoo");
+    assert_eq!(b.find("foo", (0, 0), true, true), Some(f(0, 0, false)));
+    assert_eq!(b.find("foo", (0, 0), true, false), Some(f(0, 8, false)));
+    assert_eq!(b.find("foo", (0, 1), true, true), Some(f(0, 8, false)));
+    assert_eq!(b.find("foo", (0, 9), true, true), Some(f(1, 0, false)));
+}
+
+#[test]
+fn find_forward_wraps_to_top() {
+    let b = Buffer::from_text("foo\nbar\nbaz");
+    assert_eq!(b.find("foo", (1, 0), true, true), Some(f(0, 0, true)));
+    assert_eq!(b.find("foo", (2, 3), true, false), Some(f(0, 0, true)));
+}
+
+#[test]
+fn find_single_match_next_lands_on_itself_wrapped() {
+    let b = Buffer::from_text("a\nneedle\nb");
+    assert_eq!(b.find("needle", (1, 0), true, false), Some(f(1, 0, true)));
+    assert_eq!(b.find("needle", (1, 0), false, false), Some(f(1, 0, true)));
+}
+
+#[test]
+fn find_backward_is_strictly_before_and_wraps() {
+    let b = Buffer::from_text("foo bar foo\nfoo");
+    assert_eq!(b.find("foo", (1, 0), false, false), Some(f(0, 8, false)));
+    assert_eq!(b.find("foo", (0, 8), false, false), Some(f(0, 0, false)));
+    assert_eq!(b.find("foo", (0, 9), false, false), Some(f(0, 8, false)));
+    assert_eq!(b.find("foo", (0, 0), false, false), Some(f(1, 0, true)));
+}
+
+#[test]
+fn find_overlapping_matches_report_each_start() {
+    let b = Buffer::from_text("aaaa");
+    assert_eq!(b.find("aa", (0, 0), true, false), Some(f(0, 1, false)));
+    assert_eq!(b.find("aa", (0, 3), false, false), Some(f(0, 2, false)));
+}
+
+#[test]
+fn find_smart_case() {
+    let b = Buffer::from_text("Foo foo FOO");
+    // lowercase query ignores case
+    assert_eq!(b.find("foo", (0, 0), true, false), Some(f(0, 4, false)));
+    assert_eq!(b.find("foo", (0, 4), true, false), Some(f(0, 8, false)));
+    // a query with an uppercase char is exact
+    assert_eq!(b.find("Foo", (0, 0), true, false), Some(f(0, 0, true)));
+    assert_eq!(b.find("FOO", (0, 0), true, true), Some(f(0, 8, false)));
+    assert_eq!(b.find("fOo", (0, 0), true, true), None);
+}
+
+#[test]
+fn find_column_is_a_char_index_for_non_ascii() {
+    let b = Buffer::from_text("h\u{e9}llo \u{1F600} w\u{f6}rld\n\u{c9}t\u{e9}");
+    assert_eq!(b.find("w\u{f6}rld", (0, 0), true, true), Some(f(0, 8, false)));
+    assert_eq!(b.find("rld", (0, 0), true, true), Some(f(0, 10, false)));
+    // smart case folds a non-ASCII letter without changing lengths
+    assert_eq!(b.find("\u{e9}t", (0, 0), true, true), Some(f(1, 0, false)));
+}
+
+#[test]
+fn find_with_crlf_lone_cr_and_no_trailing_newline() {
+    let b = Buffer::from_text("one\r\ntwo\rthree\nfour");
+    assert_eq!(b.find("one", (0, 0), true, true), Some(f(0, 0, false)));
+    assert_eq!(b.find("two", (0, 0), true, true), Some(f(1, 0, false)));
+    assert_eq!(b.find("three", (0, 0), true, true), Some(f(2, 0, false)));
+    assert_eq!(b.find("four", (0, 0), true, true), Some(f(3, 0, false)));
+    assert_eq!(b.find("our", (3, 3), false, false), Some(f(3, 1, false)));
+    // a break is never part of a match
+    assert_eq!(b.find("e\r", (0, 0), true, true), None);
+    assert_eq!(b.find("e\n", (0, 0), true, true), None);
+    assert_eq!(b.find("ee", (0, 0), true, true), Some(f(2, 3, false)));
+}
+
+#[test]
+fn find_match_at_line_end_and_last_line() {
+    let b = Buffer::from_text("ab\ncd");
+    assert_eq!(b.find("b", (0, 0), true, false), Some(f(0, 1, false)));
+    assert_eq!(b.find("d", (1, 0), true, false), Some(f(1, 1, false)));
+    assert_eq!(b.find("d", (1, 1), true, false), Some(f(1, 1, true)));
+}
+
+#[test]
+fn find_empty_query_and_too_long_query_and_missing() {
+    let b = Buffer::from_text("abc\nde");
+    assert_eq!(b.find("", (0, 0), true, true), None);
+    assert_eq!(b.find("", (0, 0), false, false), None);
+    assert_eq!(b.find("abcd", (0, 0), true, true), None);
+    assert_eq!(b.find("zzz", (0, 0), true, true), None);
+    assert_eq!(Buffer::new().find("a", (0, 0), true, true), None);
+}
+
+#[test]
+fn find_does_not_touch_cursor_dirty_or_modified() {
+    let mut b = Buffer::from_text("foo\nbar");
+    b.take_dirty_row();
+    b.move_down();
+    let before = b.cursor();
+    let _ = b.find("foo", before, true, true);
+    assert_eq!(b.cursor(), before);
+    assert_eq!(b.take_dirty_row(), None);
+    assert!(!b.is_modified());
+}
+
+#[test]
+fn set_cursor_clamps_and_does_not_modify() {
+    let mut b = Buffer::from_text("abc\nde\r\nf");
+    b.take_dirty_row();
+    b.set_cursor(0, 2);
+    assert_eq!(b.cursor(), (0, 2));
+    b.set_cursor(1, 99);
+    assert_eq!(b.cursor(), (1, 2));
+    b.set_cursor(99, 99);
+    assert_eq!(b.cursor(), (2, 1));
+    b.set_cursor(99, 0);
+    assert_eq!(b.cursor(), (2, 0));
+    assert!(!b.is_modified());
+    assert_eq!(b.take_dirty_row(), None);
+    assert_cursor_valid(&mut b);
+}
+
+#[test]
+fn set_cursor_resets_the_goal_column() {
+    let mut b = Buffer::from_text("abcdef\nxy\nabcdef");
+    b.set_cursor(0, 5);
+    b.move_down(); // (1, 2), goal 5
+    b.set_cursor(1, 1);
+    b.move_down();
+    assert_eq!(b.cursor(), (2, 1));
+}
+
+#[test]
+fn go_to_line_is_one_based_and_clamped() {
+    let mut b = Buffer::from_text("a\nbb\nccc");
+    b.move_down();
+    b.move_end();
+    b.take_dirty_row();
+    b.go_to_line(2);
+    assert_eq!(b.cursor(), (1, 0));
+    b.go_to_line(0);
+    assert_eq!(b.cursor(), (0, 0));
+    b.go_to_line(999);
+    assert_eq!(b.cursor(), (2, 0));
+    b.go_to_line(1);
+    assert_eq!(b.cursor(), (0, 0));
+    assert!(!b.is_modified());
+    assert_eq!(b.take_dirty_row(), None);
+    let mut e = Buffer::new();
+    e.go_to_line(5);
+    assert_eq!(e.cursor(), (0, 0));
+}

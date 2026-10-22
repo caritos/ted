@@ -230,6 +230,83 @@ impl Buffer {
         self.col = self.goal_col.min(self.line_len(self.row));
     }
 
+    /// Finds `query` within single lines. Smart case: case-insensitive unless
+    /// the query has an uppercase char. Forward: the first match starting at
+    /// or after `from` (strictly after unless `include_from`), wrapping to the
+    /// top. Backward: the last match starting strictly before `from`, wrapping
+    /// to the bottom. A wrapped search may land on the match at `from` itself.
+    /// Never changes the buffer or the cursor.
+    pub fn find(
+        &self,
+        query: &str,
+        from: (usize, usize),
+        forward: bool,
+        include_from: bool,
+    ) -> Option<Found> {
+        if query.is_empty() {
+            return None;
+        }
+        let exact = query.chars().any(char::is_uppercase);
+        let needle: Vec<char> = query.chars().map(|c| fold(c, exact)).collect();
+        let rows = self.line_count();
+        let matches = |row: usize| -> Vec<usize> {
+            let hay: Vec<char> = self.line(row).chars().map(|c| fold(c, exact)).collect();
+            if hay.len() < needle.len() {
+                return Vec::new();
+            }
+            (0..=hay.len() - needle.len())
+                .filter(|&i| hay[i..i + needle.len()] == needle[..])
+                .collect()
+        };
+        let found = |row: usize, col: usize, wrapped: bool| Some(Found { row, col, wrapped });
+        let (from_row, from_col) = from;
+        if forward {
+            for row in from_row..rows {
+                let hit = matches(row).into_iter().find(|&c| {
+                    row > from_row || c > from_col || (include_from && c == from_col)
+                });
+                if let Some(col) = hit {
+                    return found(row, col, false);
+                }
+            }
+            for row in 0..=from_row.min(rows - 1) {
+                if let Some(&col) = matches(row).first() {
+                    return found(row, col, true);
+                }
+            }
+        } else {
+            for row in (0..=from_row.min(rows - 1)).rev() {
+                let hit = matches(row)
+                    .into_iter()
+                    .rev()
+                    .find(|&c| row < from_row || c < from_col);
+                if let Some(col) = hit {
+                    return found(row, col, false);
+                }
+            }
+            for row in (from_row.min(rows - 1)..rows).rev() {
+                if let Some(&col) = matches(row).last() {
+                    return found(row, col, true);
+                }
+            }
+        }
+        None
+    }
+
+    /// Puts the cursor at the nearest valid position to (`row`, `col`).
+    /// Not an edit: leaves the modified flag and dirty row alone.
+    pub fn set_cursor(&mut self, row: usize, col: usize) {
+        self.row = row.min(self.line_count() - 1);
+        self.col = col.min(self.line_len(self.row));
+        self.goal_col = self.col;
+    }
+
+    /// Moves to column 0 of the 1-based `line`, clamped to the buffer (0 acts
+    /// as line 1).
+    pub fn go_to_line(&mut self, line_1_based: usize) {
+        self.set_cursor(line_1_based.saturating_sub(1), 0);
+    }
+
     fn cursor_index(&self) -> usize {
         self.rope.line_to_char(self.row) + self.col
     }
@@ -237,6 +314,23 @@ impl Buffer {
     fn line_len(&self, row: usize) -> usize {
         let line = self.rope.line(row);
         line.len_chars() - break_len(line)
+    }
+}
+
+/// A search match: `col` is a char index within the line text.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Found {
+    pub row: usize,
+    pub col: usize,
+    pub wrapped: bool,
+}
+
+/// One char for smart-case comparison; never changes the char count.
+fn fold(c: char, exact: bool) -> char {
+    if exact {
+        c
+    } else {
+        c.to_lowercase().next().unwrap_or(c)
     }
 }
 

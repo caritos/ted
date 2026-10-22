@@ -51,6 +51,10 @@ Press Ctrl-T in the editor to open a read-only file tree rooted at the same dire
 | `q` / Esc / Ctrl-T | Back to the editor |
 | Ctrl-G | Jump to the changes view (and Ctrl-T in that view jumps to the tree) |
 
+## Syntax highlighting
+
+Files ending in `.rs` are drawn with colors from the terminal's ANSI palette, so they follow your terminal theme: keywords magenta, types yellow, strings green, comments dark grey, numbers cyan, and macros, attributes and lifetimes blue. It is always on and has no configuration. Every other file, and unnamed buffers, is drawn plain for now. The git diff and the file tree are not highlighted. Colors only change how text is drawn, never the text or the cursor.
+
 ## Keys
 
 | Key | Action |
@@ -81,6 +85,7 @@ src/text.rs     Shared text helpers (width fitting, truncation).
 src/filetree.rs Read-only file tree state: expansion, selection, rendering.
 src/app.rs      Owns the editor, git view and file tree; switches between them.
 src/screen.rs   Plain Screen value both modes render to.
+src/highlight.rs Rust tokenizer: classifies each char of a line (std only).
 src/main.rs     Thin crossterm layer: raw mode, read keys, draw the View,
                 restore the terminal on exit, error and panic.
 scripts/pty_smoke.py   Drives the release binary through a pseudo-terminal.
@@ -97,20 +102,20 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 180 unit tests
+cargo test                                   # 226 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
 
-The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. That is 39 checks in total (27 before the tree, 12 for the tree).
+The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dark grey color sequences, and that a `.txt` file with identical text has no color sequences. That is 46 checks in total (27 before the tree, 12 for the tree, 7 for highlighting).
 
 The file tree's Ctrl-G / Ctrl-T cross-switching, its once-a-second refresh, the `(cannot read)` row and rooting for `ted <file>` are covered by unit tests only, not by the pty run.
 
-Verified by hand in a real terminal: save, quit, add text, delete text. Unit tests and the pty test do not prove look and feel, window resizing, Option/Alt keys, the git view's live refresh while another process edits files, its colors, or its behavior in a very large repo; likewise the file tree's colors, resize, live refresh while another process changes files, Ctrl-G / Ctrl-T cross-switching, a very large directory and symlinked directories; those are still unchecked.
+Verified by hand in a real terminal: save, quit, add text, delete text. Unit tests and the pty test do not prove look and feel, window resizing, Option/Alt keys, the git view's live refresh while another process edits files, its colors, or its behavior in a very large repo; the highlighting colors on a real terminal, their readability in your theme (especially dark grey comments) and scroll speed on a very large Rust file are also unchecked; likewise the file tree's colors, resize, live refresh while another process changes files, Ctrl-G / Ctrl-T cross-switching, a very large directory and symlinked directories; those are still unchecked.
 
 ## Not yet
 
-Home/End, PageUp/PageDown, undo, search, a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+Home/End, PageUp/PageDown, undo, search, a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

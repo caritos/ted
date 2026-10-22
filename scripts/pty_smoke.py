@@ -273,6 +273,51 @@ finally:
             pass
     shutil.rmtree(tree, ignore_errors=True)
 
+# 11. syntax highlighting: a .rs file is drawn with ANSI colors right before
+# the keyword, string and comment; a .txt file with identical text has none.
+# crossterm emits the 256-color form: magenta \x1b[38;5;13m, green
+# \x1b[38;5;10m, dark grey \x1b[38;5;8m.
+hl = tempfile.mkdtemp(prefix="ted-smoke-hl-")
+SRC = 'fn main() { let s = "hi"; } // note\n'
+
+
+def open_and_quit(path):
+    pid, fd = spawn([path])
+    try:
+        out = drain(fd)
+        send(fd, CTRL_Q)
+        drain(fd)
+        return out, wait_exit(pid) == 0
+    finally:
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+        try:
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+        os.close(fd)
+
+
+try:
+    rs = os.path.join(hl, "sample.rs")
+    txt = os.path.join(hl, "sample.txt")
+    for p in (rs, txt):
+        with open(p, "w") as f:
+            f.write(SRC)
+    out, ok = open_and_quit(rs)
+    check("rs: keyword is magenta", b"\x1b[38;5;13mfn" in out, out[:300])
+    check("rs: string is green", b'\x1b[38;5;10m"hi"' in out, out[:300])
+    check("rs: comment is dark grey", b"\x1b[38;5;8m// note" in out, out[:300])
+    check("rs session exits 0", ok)
+    out, ok = open_and_quit(txt)
+    check("txt: text is shown", b'fn main() { let s = "hi"; } // note' in out, out[:300])
+    check("txt: no syntax colors", b"\x1b[38;5;" not in out, out[:300])
+    check("txt session exits 0", ok)
+finally:
+    shutil.rmtree(hl, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

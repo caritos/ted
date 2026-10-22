@@ -11,6 +11,8 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - `src/filetree.rs` - read-only file tree state (expansion, selection, refresh, rendering to rows). No terminal code.
 - `src/app.rs` - owns the `Editor`, the optional git view and file tree (`Mode` enum); Ctrl-G / Ctrl-T / `q` switch modes.
 - `src/screen.rs` - plain `Screen` value (cells + styles) that both modes render to.
+- `src/screen.rs` - plain `Screen`/`Style` value that every mode renders to; includes the syntax styles.
+- `src/highlight.rs` - Rust tokenizer (std only, char-based), chosen by file extension; `Editor::view` fills per-char styles from it.
 - `src/main.rs` - thin crossterm layer only: raw mode, read keys, draw the `View`. Keep logic out of it.
 - `scripts/pty_smoke.py` - drives the release binary through a pty.
 
@@ -42,3 +44,9 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Done, unit-tested: `ted <dir>` opens an empty buffer located in that directory; git view with file list + diff, Up/Down, PageUp/PageDown, Enter opens a file, `r` resets the baseline, `b` recent-commits picker, `q`/Esc back, "not a git repository" for a non-repo. Done, pty smoke (hermetic git env): Ctrl-G, `q`, file list (tracked + untracked), a `+` diff line, dirty-buffer round trip, non-repo error. Up/Down, PageUp/PageDown, Enter, `r`, `b` and Esc are unit-tested only. Design: `docs/superpowers/specs/2026-10-22-changes-viewer-design.md`.
 - Not yet verified by hand: the live refresh while Claude edits files, resize inside the git view, colors on a real terminal, a very large repo.
 - Deferred: wide-char alignment in the git view, mouse, word diffs, a configurable refresh rate.
+
+### 2026-10-22 (syntax highlighting)
+- Done (unit-tested, 226 tests): Rust tokenizer in `highlight.rs`, wired through `Editor::view`, `App::editor_screen` and `main.rs`; `.rs` files only, always on, no config.
+- Done (pty smoke, 46 checks, 7 new): `.rs` file emits magenta before `fn`, green before the string, dark grey before the comment; a `.txt` file with the same text has no color sequences. Confirmed the new checks fail with highlighting stubbed out.
+- Not yet verified by hand: how the colors look on a real terminal and theme readability (especially dark grey comments); scroll speed on a very large Rust file.
+- Deferred: other languages, a highlight-state cache, highlighting in the git diff and the file tree, a theme or toggle.

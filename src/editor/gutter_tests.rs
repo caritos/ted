@@ -9,7 +9,9 @@ fn numbered(n: usize) -> Editor {
 }
 
 fn rs_editor(text: &str) -> Editor {
-    let dir = std::env::temp_dir().join(format!("ted-gutter-{}-{}", std::process::id(), text.len()));
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!("ted-gutter-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("x.rs");

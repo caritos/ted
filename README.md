@@ -68,7 +68,7 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | Arrow keys | Move the cursor. Left and Right wrap across line ends; Up and Down remember the column across short lines |
 | Printable keys | Insert text |
 | Enter | New line |
-| Tab | Insert 4 spaces |
+| Tab | Insert 4 spaces (an existing tab character is drawn up to the next multiple of 4) |
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |
 | Ctrl-T | Open the file tree (again: back to the editor) |
@@ -131,7 +131,7 @@ The bottom of the screen shows a status bar (file name, `[+]` when modified, `li
 
 Saving writes to a temporary sibling file and renames it over the target, so a failed write never leaves a half-written file. Symlinks are followed and existing file permissions are kept.
 
-Control characters in a file, its name or a message are never sent to the terminal: each one is drawn as a single `?` (a tab as a single space), so a file containing escape sequences cannot recolor, clear or retitle your terminal. Only the drawing changes; the text itself and the bytes saved stay exactly as they were. Tabs are not expanded to tab stops yet.
+Control characters in a file, its name or a message are never sent to the terminal: each one is drawn as a single `?`, so a file containing escape sequences cannot recolor, clear or retitle your terminal. Only the drawing changes; the text itself and the bytes saved stay exactly as they were. In the editor a tab is drawn as spaces up to the next multiple of 4 columns (the cursor sits on the first cell of a tab); the git view, file tree and messages still draw a tab as one space. The status `row:col` counts characters, not display columns.
 
 Very small windows (fewer than 3 rows, or 0 columns) show only what fits, and never crash, even after scrolling.
 
@@ -143,7 +143,7 @@ src/editor.rs    Key handling, scrolling, status and messages.
                  Editor::view(width, height) returns a plain View value to draw.
 src/git.rs       Read-only `git` CLI wrapper behind a trait (status, diff, log).
 src/gitview.rs   Git view state: file list, selection, diff scroll, commit picker.
-src/text.rs      Shared text helpers (width fitting, truncation, `sanitize`).
+src/text.rs      Shared text helpers (width fitting, truncation, `sanitize`, tab-stop layout).
 src/filetree.rs  Read-only file tree state: expansion, selection, rendering.
 src/bufferlist.rs Buffer list state (selection, keys) and rendering.
 src/help.rs      Help screen: the key table, scrolling and rendering.
@@ -180,7 +180,7 @@ Verified by hand in a real terminal: save, quit, add text, delete text. Unit tes
 
 ## Not yet
 
-undo, search extras (match highlight, replace, regex, multi-line queries, search in other views, one search term shared across buffers), tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+undo, search extras (match highlight, replace, regex, multi-line queries, search in other views, one search term shared across buffers), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

@@ -20,7 +20,7 @@ ted somefile.txt
 
 ## Git changes view
 
-Press Ctrl-G in the editor to open a read-only git view: changed files on the left (status letter `M`/`A`/`D`/`?`, path, age, newest first) and the diff of the selected file on the right. It refreshes about once a second, so you can watch another process (for example Claude) change files. `q` or Esc returns to the editor exactly as it was. Outside a git repository it shows "not a git repository".
+Press Ctrl-G in the editor to open a read-only git view: changed files on the left (status letter `M`/`A`/`D`/`?`, path, age, newest first) and the diff of the selected file on the right. It refreshes about once a second, so you can watch another process (for example Claude) change files. `q`, Esc or Ctrl-G again returns to the editor exactly as it was. Outside a git repository it shows "not a git repository".
 
 "Changed" means different from the baseline commit, which is `HEAD` at the moment you first open the git view. Commits made afterwards do not hide changes. Untracked files respect `.gitignore`.
 
@@ -31,7 +31,7 @@ Press Ctrl-G in the editor to open a read-only git view: changed files on the le
 | Enter | Open the selected file in the editor (refused with a message if the current buffer has unsaved changes) |
 | `r` | Reset the baseline to the current `HEAD` |
 | `b` | Pick a recent commit as the baseline (Enter picks, Esc closes) |
-| `q` / Esc | Back to the editor |
+| `q` / Esc / Ctrl-G | Back to the editor (closes the commit picker first if open) |
 
 The git view only reads: it never stages, commits or changes the repo or working tree.
 
@@ -44,7 +44,7 @@ The git view only reads: it never stages, commits or changes the repo or working
 | Enter | New line |
 | Tab | Insert 4 spaces |
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
-| Ctrl-G | Open the git changes view |
+| Ctrl-G | Open the git changes view (again: back to the editor) |
 | Ctrl-S | Save |
 | Ctrl-Q | Quit. With unsaved changes it warns first; press Ctrl-Q again to quit without saving. Any other key cancels the warning |
 

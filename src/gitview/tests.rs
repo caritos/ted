@@ -287,6 +287,22 @@ fn esc_closes_picker_without_changing_baseline() {
 }
 
 #[test]
+fn ctrl_g_backs_out_like_esc() {
+    let ctrl_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+    let mut git = FakeGit::new();
+    git.log = vec![commit("c1", "first")];
+    let mut view = refreshed(&git);
+
+    // With the picker open it closes the picker only, as Esc does.
+    view.handle_key(ch('b'), &git, t(1000));
+    assert_eq!(view.handle_key(ctrl_g, &git, t(1000)), GitAction::None);
+    assert!(!view.picker_open());
+
+    // With no picker it leaves the git view.
+    assert_eq!(view.handle_key(ctrl_g, &git, t(1000)), GitAction::Back);
+}
+
+#[test]
 fn empty_log_picker_shows_message_and_closes_on_esc() {
     let mut git = FakeGit::new();
     git.head = Baseline::Empty;

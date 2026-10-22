@@ -124,6 +124,23 @@ fn ctrl_g_switches_to_git_view_and_q_returns_with_editor_state_intact() {
 }
 
 #[test]
+fn ctrl_g_in_git_view_returns_to_editor_with_state_intact() {
+    let mut app = text_app("one\ntwo", one_file());
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('g'), t(1000));
+    assert!(app.in_git_view());
+
+    assert_eq!(app.handle_key(ctrl('g'), t(1000)), Flow::Continue);
+    assert!(!app.in_git_view());
+    assert_eq!(app.editor().buffer().text(), "Xone\ntwo");
+    assert!(app.editor().buffer().is_modified());
+
+    // And it toggles back in again.
+    app.handle_key(ctrl('g'), t(1001));
+    assert!(app.in_git_view());
+}
+
+#[test]
 fn second_ctrl_g_refreshes_the_git_view() {
     let git = Shared::new(one_file());
     let mut app = App::new(Editor::new(Buffer::new()), PathBuf::from("/x"), Box::new(git.clone()));

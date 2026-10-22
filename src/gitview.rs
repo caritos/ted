@@ -134,6 +134,13 @@ impl GitView {
 
     pub fn handle_key(&mut self, key: KeyEvent, git: &dyn Git, now: SystemTime) -> GitAction {
         self.message.clear();
+        // Ctrl-G toggles the git view, so it backs out one level like Esc.
+        let key = if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g')
+        {
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+        } else {
+            key
+        };
         if self.picker.is_some() {
             self.picker_key(key, git, now);
             return GitAction::None;

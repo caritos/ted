@@ -81,6 +81,9 @@ impl FileTree {
     /// Re-read the root and every expanded directory. The selection stays on
     /// its path, or moves to the nearest ancestor that still exists.
     /// Directories that disappeared are no longer expanded.
+    ///
+    /// This reads synchronously, so a hung mount (e.g. a stale network
+    /// share) can still block a refresh; accepted, as for the git view.
     pub fn refresh(&mut self) {
         let old = std::mem::take(&mut self.listings);
         let mut expanded = HashSet::new();
@@ -137,19 +140,23 @@ impl FileTree {
             if item.file_name() == ".git" {
                 continue;
             }
-            // `metadata` follows symlinks; a broken link is just a file.
-            let kind = match std::fs::metadata(item.path()) {
-                Ok(m) if m.is_dir() => NodeKind::Dir,
-                _ => NodeKind::File,
+            // `file_type` costs no extra syscall on most platforms. Only a
+            // symlink is followed (with `metadata`) to tell dir from file;
+            // a broken link is just a file.
+            let is_dir = match item.file_type() {
+                Ok(t) if t.is_symlink() => {
+                    std::fs::metadata(item.path()).is_ok_and(|m| m.is_dir())
+                }
+                Ok(t) => t.is_dir(),
+                Err(_) => false,
             };
+            let kind = if is_dir { NodeKind::Dir } else { NodeKind::File };
             entries.push(Entry { name: item.file_name().to_string_lossy().into_owned(), kind });
         }
-        entries.sort_by(|a, b| {
-            (a.kind == NodeKind::File, a.name.trim().to_lowercase(), &a.name).cmp(&(
-                b.kind == NodeKind::File,
-                b.name.trim().to_lowercase(),
-                &b.name,
-            ))
+        // Directories first, then a trimmed case-insensitive key, then the
+        // exact name. The key is computed once per entry, not per comparison.
+        entries.sort_by_cached_key(|e| {
+            (e.kind == NodeKind::File, e.name.trim().to_lowercase(), e.name.clone())
         });
         Ok(entries)
     }

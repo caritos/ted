@@ -95,6 +95,34 @@ fn lists_root_directories_first_then_files_case_insensitively() {
 }
 
 #[test]
+fn sort_key_ignores_surrounding_whitespace_and_ties_break_on_the_exact_name() {
+    let d = Temp::new("order-trim");
+    d.file("alpha.txt");
+    d.file(" beta.txt"); // leading space: sorts as "beta.txt"
+    d.file("Charlie.txt");
+    d.file("x");
+    d.file("x "); // same key as "x" and " x"; exact name breaks the tie
+    d.file(" x");
+    d.dir(" zdir");
+    d.dir("Adir");
+    let t = d.tree();
+    assert_eq!(
+        names(&t),
+        ["Adir", " zdir", "alpha.txt", " beta.txt", "Charlie.txt", " x", "x", "x "]
+    );
+}
+
+#[test]
+fn symlink_to_a_file_is_a_file() {
+    let d = Temp::new("filelink");
+    d.file("real.txt");
+    symlink(d.0.join("real.txt"), d.0.join("link.txt")).unwrap();
+    let t = d.tree();
+    assert_eq!(names(&t), ["link.txt", "real.txt"]);
+    assert!(t.visible().iter().all(|r| r.kind == NodeKind::File));
+}
+
+#[test]
 fn dot_git_is_hidden_but_other_dotfiles_are_shown() {
     let d = Temp::new("dotgit");
     d.dir(".git");

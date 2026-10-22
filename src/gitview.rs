@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::git::{format_age, Baseline, Change, ChangeKind, Commit, Git};
 use crate::screen::{Row, Screen, Span, Style};
+use crate::text::{clip, pad, styled, window_start};
 
 /// Commits listed in the baseline picker.
 const PICKER_LIMIT: usize = 50;
@@ -411,11 +412,6 @@ impl GitView {
     }
 }
 
-/// First row to show so that `selected` is inside a window of `height` rows.
-fn window_start(selected: usize, height: usize) -> usize {
-    (selected + 1).saturating_sub(height.max(1))
-}
-
 /// Each diff line with its style. File header lines (`diff`, `index`,
 /// `---`, `+++`) are only recognised before a file's first hunk; inside a
 /// hunk `--- x` is a removed line and `+++x` an added one.
@@ -445,40 +441,6 @@ fn diff_style(line: &str, in_header: bool) -> Style {
     } else {
         Style::Normal
     }
-}
-
-/// `s` safe to print: C0 controls, DEL and C1 controls become `?` so text
-/// from git, file names or messages can never send escape sequences, carriage
-/// returns and the like to the terminal. A tab (diff lines expand theirs
-/// before this) becomes one space so the width stays one column.
-fn sanitize(s: &str) -> String {
-    s.chars().map(sanitize_char).collect()
-}
-
-fn sanitize_char(c: char) -> char {
-    match c {
-        '\t' => ' ',
-        c if c.is_control() => '?',
-        c => c,
-    }
-}
-
-/// At most `n` characters of `s`, sanitized. Every piece of text in a row,
-/// the status or the message goes through here.
-fn clip(s: &str, n: usize) -> String {
-    sanitize(&s.chars().take(n).collect::<String>())
-}
-
-/// `s` clipped or space-padded to exactly `n` characters.
-fn pad(s: &str, n: usize) -> String {
-    let mut out = clip(s, n);
-    let len = out.chars().count();
-    out.extend(std::iter::repeat_n(' ', n - len));
-    out
-}
-
-fn styled(s: &str, width: usize, style: Style) -> Row {
-    vec![Span { text: clip(s, width), style }]
 }
 
 /// "YYYY-MM-DD HH:MM" in UTC for a Unix timestamp.

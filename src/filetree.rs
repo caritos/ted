@@ -93,7 +93,10 @@ impl FileTree {
         let mut errors = Vec::new();
         self.reload("", &old, &mut expanded, &mut errors);
         self.expanded = expanded;
-        if let Some(e) = errors.pop() {
+        // Never replace a message already showing (e.g. a refusal).
+        if let Some(e) = errors.pop()
+            && self.message.is_empty()
+        {
             self.message = e;
         }
         self.ensure_selection();

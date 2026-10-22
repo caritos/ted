@@ -339,6 +339,31 @@ fn unreadable_directory_sets_message_and_marks_unreadable() {
 }
 
 #[test]
+fn refresh_finding_a_newly_unreadable_directory_keeps_an_existing_message() {
+    let d = Temp::new("unreadable-later");
+    d.file("locked/secret.txt");
+    let mut t = d.tree();
+    press(&mut t, &[KeyCode::Right]); // expand while readable
+    assert_eq!(t.message(), "");
+    fs::set_permissions(d.0.join("locked"), fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(d.0.join("locked")).is_ok() {
+        return; // running as root: permissions are ignored
+    }
+    t.set_message("Unsaved changes: save or quit first".to_string());
+    t.refresh();
+    assert_eq!(t.message(), "Unsaved changes: save or quit first");
+    assert!(t.visible()[0].unreadable);
+
+    // With no message showing, the error is reported.
+    restore(&d.0);
+    t.refresh();
+    fs::set_permissions(d.0.join("locked"), fs::Permissions::from_mode(0o000)).unwrap();
+    t.handle_key(key(KeyCode::Home)); // clears the message
+    t.refresh();
+    assert!(t.message().starts_with("Cannot read locked: "), "{}", t.message());
+}
+
+#[test]
 fn symlink_to_directory_is_a_directory_and_a_cycle_does_not_hang() {
     let d = Temp::new("symlink");
     d.file("real/f.txt");

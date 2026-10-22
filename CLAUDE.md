@@ -7,7 +7,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - `src/editor.rs` - key handling, scrolling, status/message, quit confirmation. `Editor::view()` returns a pure `View`.
 - `src/git.rs` - runs the `git` CLI (read-only) behind a `Git` trait: status, diff, log, baseline. No terminal code.
 - `src/gitview.rs` - git view state machine: file list, selection by path, diff scroll, commit picker, refresh.
-- `src/text.rs` - shared text helpers (width fitting, truncation) used by the views.
+- `src/text.rs` - shared text helpers (width fitting, truncation, `sanitize`) used by the views. Every string drawn (editor rows, status, message; git view; file tree) maps control chars to `?` one-for-one; in the editor that happens in `editor.rs`'s private `clip`, the only builder of `View` strings.
 - `src/filetree.rs` - read-only file tree state (expansion, selection, refresh, rendering to rows). No terminal code.
 - `src/app.rs` - owns the `Editor`, the optional git view and file tree (`Mode` enum); Ctrl-G / Ctrl-T / `q` switch modes.
 - `src/screen.rs` - plain `Screen` value (rows of styled spans) that both modes render to; `Style` includes the syntax styles.
@@ -52,3 +52,10 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Measured by script, not by hand (release build, keypress then `Editor::view(120, 40)` with the cursor at the bottom, scratch bench crate): before/after the cache, 10k lines 8.7 ms -> 0.09 ms, 100k lines 85 ms -> 0.06 ms; scrolling one row 7.9 ms -> 0.1 ms (10k) and 85 ms -> 0.05 ms (100k). The cold first frame at the bottom of a 100k-line file still costs about 85-90 ms once (10k: about 19 ms). A single 1 MB line still costs about 10 ms per frame (the visible line is tokenized whole); `.txt` files about 0.03 ms.
 - Not yet verified by hand: how the colors look on a real terminal and theme readability (including dim comments); scroll feel on a very large Rust file.
 - Deferred: other languages, highlighting in the git diff and the file tree, a theme or toggle, faster tokenizing of a single huge line.
+
+### 2026-10-22 (hardening: escape injection, tiny-terminal panic)
+- Done (unit-tested, 246 tests in total): editor rows, status bar (file name) and message are sanitized one char for one char (`?` for C0/DEL/C1, one space for a tab), so cursor, horizontal scroll and the style grid stay aligned; the buffer and saved bytes are unchanged (test saves a file with control chars and compares bytes). `Editor::view` no longer underflows the cursor with < 3 rows or 0 columns after scrolling (saturating relative cursor); 0..=6 x 0..=6 sweeps in `Editor` and `App`; the randomized highlight-cache test uses its original (40, 1) viewport again.
+- Done (pty smoke, 52 checks in total, 5 new): a `.txt` file containing `ESC[31mRED ESC[2J END` sends neither sequence (beyond ted's own entry clear) and draws `?[31mRED` and `END`. Seen failing (3 checks) with the sanitizing removed from `clip`.
+- Note: ropey treats a lone `\r` (and VT, FF, NEL, U+2028/9) as a line break, so those never reach a row; they are kept as-is on save.
+- Not yet verified by hand: any of the above in a real terminal.
+- Deferred: proper tab expansion so tabs align to tab stops (a tab currently shows as one space); other invisible/bidi Unicode (e.g. U+202E) is shown as-is.

@@ -73,6 +73,10 @@ The bottom of the screen shows a status bar (file name, `[+]` when modified, `li
 
 Saving writes to a temporary sibling file and renames it over the target, so a failed write never leaves a half-written file. Symlinks are followed and existing file permissions are kept.
 
+Control characters in a file, its name or a message are never sent to the terminal: each one is drawn as a single `?` (a tab as a single space), so a file containing escape sequences cannot recolor, clear or retitle your terminal. Only the drawing changes; the text itself and the bytes saved stay exactly as they were. Tabs are not expanded to tab stops yet.
+
+Very small windows (fewer than 3 rows, or 0 columns) show only what fits, and never crash, even after scrolling.
+
 ## How it is built
 
 ```
@@ -102,12 +106,12 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 237 unit tests
+cargo test                                   # 246 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
 
-The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dim sequences, and that a `.txt` file with identical text has no color or dim sequences. That is 47 checks in total (27 before the tree, 12 for the tree, 8 for highlighting).
+The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dim sequences, and that a `.txt` file with identical text has no color or dim sequences. The last one opens a `.txt` file containing `ESC[31mRED ESC[2J END` and checks that neither sequence reaches the terminal (apart from ted's own clear on entering the alternate screen) and that `?[31mRED` and `END` are drawn. That is 52 checks in total (27 before the tree, 12 for the tree, 8 for highlighting, 5 for escape sequences).
 
 The file tree's Ctrl-G / Ctrl-T cross-switching, its once-a-second refresh, the `(cannot read)` row and rooting for `ted <file>` are covered by unit tests only, not by the pty run.
 
@@ -115,7 +119,7 @@ Verified by hand in a real terminal: save, quit, add text, delete text. Unit tes
 
 ## Not yet
 
-Home/End, PageUp/PageDown, undo, search, a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+Home/End, PageUp/PageDown, undo, search, tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

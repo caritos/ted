@@ -179,20 +179,6 @@ fn enter_loads_selected_file_into_editor() {
 }
 
 #[test]
-fn enter_with_unsaved_changes_refuses_and_keeps_buffer() {
-    let dir = temp_dir("unsaved");
-    fs::write(dir.join("a.txt"), "from disk\n").unwrap();
-    let mut app = app_with(Editor::new(Buffer::new()), dir, one_file());
-    type_str(&mut app, "draft");
-    app.handle_key(ctrl('g'), t(1000));
-    app.handle_key(key(KeyCode::Enter), t(1000));
-    assert!(app.in_git_view());
-    assert_eq!(app.screen(60, 6, t(1000)).message, "Unsaved changes: save or quit first");
-    assert_eq!(app.editor().buffer().text(), "draft");
-    assert!(app.editor().buffer().is_modified());
-}
-
-#[test]
 fn enter_on_unreadable_file_shows_error_and_stays_in_git_view() {
     let dir = temp_dir("unreadable");
     fs::write(dir.join("a.txt"), [0xff, 0xfe, 0x00]).unwrap();
@@ -489,8 +475,9 @@ fn ctrl_t_from_git_view_leaves_no_stale_message_or_open_picker() {
     assert_eq!(app.screen(80, 6, t(1000)).message, "");
 
     // A refusal message does not survive it either.
+    fs::remove_file(dir.0.join("a.txt")).unwrap();
     app.handle_key(key(KeyCode::Enter), t(1000));
-    assert_eq!(app.screen(80, 6, t(1000)).message, "Unsaved changes: save or quit first");
+    assert_eq!(app.screen(80, 6, t(1000)).message, "File no longer exists");
     app.handle_key(ctrl('t'), t(1000));
     app.handle_key(ctrl('g'), t(1000));
     assert_eq!(app.screen(80, 6, t(1000)).message, "");
@@ -538,20 +525,6 @@ fn enter_on_file_in_tree_loads_it_and_returns_to_editor() {
     assert_eq!(app.editor().buffer().text(), "from disk\n");
     assert_eq!(app.editor().buffer().path(), Some(dir.0.join("a.txt").as_path()));
     assert!(!app.editor().buffer().is_modified());
-}
-
-#[test]
-fn enter_on_file_with_unsaved_changes_refuses_and_shows_message_in_tree() {
-    let dir = Temp::new("tree-unsaved");
-    dir.file("a.txt", "from disk\n");
-    let mut app = tree_app(&dir, "");
-    type_str(&mut app, "draft");
-    app.handle_key(ctrl('t'), t(1000));
-    app.handle_key(key(KeyCode::Enter), t(1000));
-    assert!(app.in_file_tree());
-    assert_eq!(app.screen(60, 6, t(1000)).message, "Unsaved changes: save or quit first");
-    assert_eq!(app.editor().buffer().text(), "draft");
-    assert!(app.editor().buffer().is_modified());
 }
 
 #[test]
@@ -850,4 +823,128 @@ fn editor_screen_survives_tiny_sizes_after_scrolling() {
             assert!(screen.status.chars().count() <= w && screen.message.chars().count() <= w);
         }
     }
+}
+
+// ---- Several buffers ----
+
+/// App whose first buffer is `a.txt` from `dir`, with `a.txt`, `b.txt`, `c.txt` on disk.
+fn multi_app(dir: &Temp) -> App {
+    dir.file("a.txt", "alpha\nsecond\n");
+    dir.file("b.txt", "beta\n");
+    dir.file("c.txt", "gamma\n");
+    let buffer = Buffer::open(&dir.0.join("a.txt")).unwrap();
+    app_with(Editor::new(buffer), dir.0.clone(), one_file())
+}
+
+/// Opens the `n`th (0-based) top-level file of the tree.
+fn open_from_tree(app: &mut App, n: usize) {
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(key(KeyCode::Home), t(1000));
+    for _ in 0..n {
+        app.handle_key(key(KeyCode::Down), t(1000));
+    }
+    app.handle_key(key(KeyCode::Enter), t(1000));
+}
+
+#[test]
+fn opening_while_modified_keeps_both_buffers() {
+    let dir = Temp::new("multi-modified");
+    let mut app = multi_app(&dir);
+    type_str(&mut app, "X");
+    open_from_tree(&mut app, 1);
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 1);
+    assert_eq!(app.editor().buffer().text(), "beta\n");
+    app.handle_key(ctrl('p'), t(1000));
+    assert_eq!(app.current_index(), 0);
+    assert!(app.editor().buffer().is_modified());
+    assert_eq!(app.editor().buffer().text(), "Xalpha\nsecond\n");
+}
+
+#[test]
+fn opening_open_file_switches() {
+    let dir = Temp::new("multi-switch");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    open_from_tree(&mut app, 1);
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 1);
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
+}
+
+#[test]
+fn opening_replaces_pristine_unnamed_buffer() {
+    let dir = Temp::new("multi-pristine");
+    dir.file("b.txt", "beta\n");
+    let mut app = app_with(Editor::new(Buffer::new()), dir.0.clone(), one_file());
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 1);
+    assert_eq!(app.editor().buffer().text(), "beta\n");
+}
+
+#[test]
+fn opening_keeps_modified_unnamed_buffer() {
+    let dir = Temp::new("multi-unnamed-modified");
+    dir.file("b.txt", "beta\n");
+    let mut app = app_with(Editor::new(Buffer::new()), dir.0.clone(), one_file());
+    type_str(&mut app, "x");
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 2);
+}
+
+#[test]
+fn opening_same_file_via_dot_path_does_not_duplicate() {
+    let dir = Temp::new("multi-canon");
+    let mut app = multi_app(&dir);
+    // The first buffer was opened through a path with a `./` detour.
+    let detour = dir.0.join(".").join("a.txt");
+    app.editors[0] = Editor::new(Buffer::open(&detour).unwrap());
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 1);
+}
+
+#[test]
+fn ctrl_n_and_ctrl_p_wrap() {
+    let dir = Temp::new("multi-wrap");
+    let mut app = multi_app(&dir);
+    app.handle_key(key(KeyCode::Down), t(1000)); // a.txt cursor row 1
+    open_from_tree(&mut app, 1);
+    open_from_tree(&mut app, 2);
+    assert_eq!(app.buffer_count(), 3);
+    assert_eq!(app.current_index(), 2);
+    app.handle_key(ctrl('n'), t(1000));
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(app.editor().buffer().cursor().0, 1);
+    app.handle_key(ctrl('p'), t(1000));
+    assert_eq!(app.current_index(), 2);
+    assert_eq!(app.editor().buffer().cursor().0, 0);
+}
+
+#[test]
+fn ctrl_n_in_a_view_switches_and_returns_to_editor() {
+    let dir = Temp::new("multi-view");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(ctrl('n'), t(1000));
+    assert!(!app.in_git_view());
+    assert_eq!(app.current_index(), 0);
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ctrl('p'), t(1000));
+    assert!(!app.in_file_tree());
+    assert_eq!(app.current_index(), 1);
+}
+
+#[test]
+fn status_shows_position_tag_only_with_many() {
+    let dir = Temp::new("multi-tag");
+    let mut app = multi_app(&dir);
+    assert!(!app.screen(40, 6, t(1000)).status.contains('/'));
+    open_from_tree(&mut app, 1);
+    open_from_tree(&mut app, 2);
+    app.handle_key(ctrl('p'), t(1000));
+    let status = app.screen(40, 6, t(1000)).status;
+    assert!(status.contains("[2/3]"), "{status}");
 }

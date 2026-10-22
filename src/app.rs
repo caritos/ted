@@ -1,6 +1,6 @@
 //! The editor plus the git view and the file tree, and which one is showing.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -24,7 +24,9 @@ enum Mode {
 }
 
 pub struct App {
-    editor: Editor,
+    /// Open buffers, never empty; `current` indexes the showing one.
+    editors: Vec<Editor>,
+    current: usize,
     /// Directory the git view and the file tree look at; opened paths are
     /// relative to it.
     location: PathBuf,
@@ -39,7 +41,7 @@ pub struct App {
 
 impl App {
     pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
-        App { editor, location, git, git_view: None, file_tree: None, mode: Mode::Editor }
+        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, mode: Mode::Editor }
     }
 
     pub fn in_git_view(&self) -> bool {
@@ -51,11 +53,36 @@ impl App {
     }
 
     pub fn editor(&self) -> &Editor {
-        &self.editor
+        &self.editors[self.current]
+    }
+
+    fn editor_mut(&mut self) -> &mut Editor {
+        &mut self.editors[self.current]
+    }
+
+    pub fn buffer_count(&self) -> usize {
+        self.editors.len()
+    }
+
+    pub fn current_index(&self) -> usize {
+        self.current
+    }
+
+    /// Switches to the next (`forward`) or previous buffer, wrapping, and
+    /// returns to the editor. The key cancels a pending quit warning.
+    fn cycle(&mut self, forward: bool) {
+        self.editor_mut().cancel_quit();
+        let n = self.editors.len();
+        self.current = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
+        self.mode = Mode::Editor;
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, now: SystemTime) -> Flow {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p')) {
+            self.cycle(key.code == KeyCode::Char('n'));
+            return Flow::Continue;
+        }
         if self.mode == Mode::Editor {
             if ctrl && key.code == KeyCode::Char('g') {
                 self.enter_git_view(now);
@@ -65,17 +92,17 @@ impl App {
                 self.enter_file_tree();
                 return Flow::Continue;
             }
-            return self.editor.handle_key(key);
+            return self.editor_mut().handle_key(key);
         }
 
         // Ctrl-Q follows the editor's quit rules; its warning shows here.
         if ctrl && key.code == KeyCode::Char('q') {
-            let flow = self.editor.handle_key(key);
-            self.set_view_message(self.editor.message().to_string());
+            let flow = self.editor_mut().handle_key(key);
+            self.set_view_message(self.editor().message().to_string());
             return flow;
         }
         // Any other key cancels a pending quit warning, as in the editor.
-        self.editor.cancel_quit();
+        self.editor_mut().cancel_quit();
 
         match self.mode {
             Mode::Editor => {}
@@ -125,16 +152,19 @@ impl App {
     }
 
     pub fn screen(&mut self, width: usize, height: usize, now: SystemTime) -> Screen {
+        let n = self.editors.len();
+        let tag = if n > 1 { format!("[{}/{}]", self.current + 1, n) } else { String::new() };
+        self.editor_mut().set_tag(tag);
         match (self.mode, &self.git_view, &self.file_tree) {
             (Mode::GitView, Some(view), _) => view.render(width, height, now),
             (Mode::Files, _, Some(tree)) => tree.render(width, height),
-            _ => editor_screen(self.editor.view(width, height)),
+            _ => editor_screen(self.editor_mut().view(width, height)),
         }
     }
 
     fn enter_git_view(&mut self, now: SystemTime) {
         // Ctrl-G is a key like any other: it cancels a pending quit warning.
-        self.editor.cancel_quit();
+        self.editor_mut().cancel_quit();
         let view = self.git_view.get_or_insert_with(GitView::new);
         view.refresh(self.git.as_ref(), now);
         self.mode = Mode::GitView;
@@ -142,7 +172,7 @@ impl App {
 
     fn enter_file_tree(&mut self) {
         // Ctrl-T is a key like any other: it cancels a pending quit warning.
-        self.editor.cancel_quit();
+        self.editor_mut().cancel_quit();
         match &mut self.file_tree {
             Some(tree) => tree.refresh(),
             // `new` lists the root, so a fresh tree needs no extra refresh.
@@ -173,18 +203,44 @@ impl App {
     fn open(&mut self, rel: &str) {
         match self.load(rel) {
             Ok(buffer) => {
-                self.editor.load(buffer);
+                self.add_or_switch(buffer);
                 self.mode = Mode::Editor;
             }
             Err(message) => self.set_view_message(message),
         }
     }
 
-    /// Reads `rel` from disk, unless that would discard unsaved edits.
-    fn load(&self, rel: &str) -> Result<Buffer, String> {
-        if self.editor.buffer().is_modified() {
-            return Err("Unsaved changes: save or quit first".to_string());
+    /// Makes `buffer` current: switches to the buffer already holding the
+    /// same file, replaces a lone pristine unnamed buffer, or appends.
+    fn add_or_switch(&mut self, buffer: Buffer) {
+        if let Some(path) = buffer.path() {
+            let found = self
+                .editors
+                .iter()
+                .position(|e| e.buffer().path().is_some_and(|p| same_file(p, path)));
+            if let Some(i) = found {
+                self.editor_mut().cancel_quit();
+                self.current = i;
+                return;
+            }
         }
+        let only = &self.editors[0];
+        let pristine = self.editors.len() == 1
+            && only.buffer().path().is_none()
+            && !only.buffer().is_modified()
+            && only.buffer().text().is_empty();
+        if pristine {
+            self.editors[0] = Editor::new(buffer);
+            self.current = 0;
+        } else {
+            self.editor_mut().cancel_quit();
+            self.editors.push(Editor::new(buffer));
+            self.current = self.editors.len() - 1;
+        }
+    }
+
+    /// Reads `rel` from disk.
+    fn load(&self, rel: &str) -> Result<Buffer, String> {
         // `Buffer::open` treats a missing file as new, and a later save
         // would recreate it. `metadata` follows symlinks, so a dangling
         // link or an unreadable parent is refused too.
@@ -200,6 +256,15 @@ impl App {
             return Err("File too large".to_string());
         }
         Buffer::open(&path).map_err(|e| format!("Open failed: {e}"))
+    }
+}
+
+/// Whether two paths name the same file: canonical forms when both resolve,
+/// else the paths as given.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
     }
 }
 

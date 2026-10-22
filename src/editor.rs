@@ -31,6 +31,8 @@ pub struct Editor {
     buffer: Buffer,
     message: String,
     quit_armed: bool,
+    /// Extra status text after the name and `[+]` (e.g. `[2/3]`); empty is none.
+    tag: String,
     scroll_row: usize,
     scroll_col: usize,
     /// Highlight state at the start of each line (index = row), valid for
@@ -49,6 +51,7 @@ impl Editor {
             buffer,
             message: String::new(),
             quit_armed: false,
+            tag: String::new(),
             scroll_row: 0,
             scroll_col: 0,
             line_states: Vec::new(),
@@ -60,6 +63,10 @@ impl Editor {
 
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    pub fn set_tag(&mut self, tag: String) {
+        self.tag = tag;
     }
 
     pub fn message(&self) -> &str {
@@ -233,7 +240,8 @@ impl Editor {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "[No Name]".to_string());
         let marker = if self.buffer.is_modified() { " [+]" } else { "" };
-        let left = format!(" {name}{marker}");
+        let tag = if self.tag.is_empty() { String::new() } else { format!(" {}", self.tag) };
+        let left = format!(" {name}{marker}{tag}");
         let (row, col) = self.buffer.cursor();
         let right = format!("{}:{} ", row + 1, col + 1);
 

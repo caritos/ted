@@ -685,3 +685,19 @@ fn view_fits_every_tiny_size_after_scrolling_and_returning_to_the_top_left() {
         }
     }
 }
+
+#[test]
+fn set_tag_appears_after_name_and_marker_sanitized_and_clipped() {
+    let mut e = Editor::new(Buffer::from_text("x"));
+    e.handle_key(key(KeyCode::Char('y')));
+    e.set_tag("[2/3]".to_string());
+    let v = e.view(30, 5);
+    assert!(v.status.starts_with(" [No Name] [+] [2/3]"), "{}", v.status);
+    e.set_tag("[\x1b2]".to_string());
+    assert!(e.view(30, 5).status.contains("[?2]"));
+    e.set_tag("[2/3]".to_string());
+    let v = e.view(14, 5);
+    assert_eq!(v.status.chars().count(), 14);
+    e.set_tag(String::new());
+    assert!(!e.view(30, 5).status.contains("[2/3]"));
+}

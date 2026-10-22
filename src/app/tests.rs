@@ -358,3 +358,308 @@ fn screen_never_panics_for_tiny_sizes() {
         }
     }
 }
+
+// ---- File tree mode ----
+
+/// A unique temp directory for a tree root, removed on drop.
+struct Temp(PathBuf);
+
+impl Temp {
+    fn new(name: &str) -> Self {
+        Temp(temp_dir(name))
+    }
+
+    fn file(&self, rel: &str, text: &str) {
+        let p = self.0.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    }
+}
+
+impl Drop for Temp {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn tree_app(dir: &Temp, text: &str) -> App {
+    app_with(Editor::new(Buffer::from_text(text)), dir.0.clone(), one_file())
+}
+
+fn rows(screen: &Screen) -> Vec<String> {
+    (0..screen.rows.len()).map(|i| row_text(screen, i)).collect()
+}
+
+fn selected_row(screen: &Screen) -> Option<String> {
+    screen
+        .rows
+        .iter()
+        .find(|r| r.iter().any(|s| s.style == Style::Selected))
+        .map(|r| r.iter().map(|s| s.text.as_str()).collect::<String>().trim_end().to_string())
+}
+
+#[test]
+fn ctrl_t_opens_tree_and_ctrl_t_or_q_or_esc_returns_with_editor_state_intact() {
+    let dir = Temp::new("tree-toggle");
+    dir.file("a.txt", "x");
+    let mut app = tree_app(&dir, "one\ntwo");
+    app.handle_key(key(KeyCode::Down), t(1000));
+    app.handle_key(key(KeyCode::Right), t(1000));
+    type_str(&mut app, "X");
+    assert!(!app.in_file_tree());
+
+    for back in [ctrl('t'), ch('q'), key(KeyCode::Esc)] {
+        assert_eq!(app.handle_key(ctrl('t'), t(1000)), Flow::Continue);
+        assert!(app.in_file_tree());
+        assert!(!app.in_git_view());
+        let screen = app.screen(60, 6, t(1000));
+        assert_eq!(screen.cursor, None);
+        assert_eq!(selected_row(&screen).as_deref(), Some("  a.txt"));
+        assert!(screen.status.starts_with("Files: "), "{}", screen.status);
+        // Ctrl-T did not reach the editor.
+        assert_eq!(app.editor().buffer().text(), "one\ntXwo");
+
+        assert_eq!(app.handle_key(back, t(1000)), Flow::Continue);
+        assert!(!app.in_file_tree());
+        assert!(!app.in_git_view());
+        assert_eq!(app.editor().buffer().text(), "one\ntXwo");
+        assert_eq!(app.editor().buffer().cursor(), (1, 2));
+        assert!(app.editor().buffer().is_modified());
+    }
+    // Typing still goes to the editor afterwards.
+    type_str(&mut app, "Y");
+    assert_eq!(app.editor().buffer().text(), "one\ntXYwo");
+}
+
+#[test]
+fn ctrl_g_in_tree_switches_to_git_view_and_ctrl_t_in_git_view_switches_to_tree() {
+    let dir = Temp::new("tree-git");
+    dir.file("a.txt", "x");
+    let git = Shared::new(one_file());
+    let mut app = App::new(Editor::new(Buffer::new()), dir.0.clone(), Box::new(git.clone()));
+
+    app.handle_key(ctrl('t'), t(1000));
+    assert!(app.in_file_tree());
+    // Ctrl-G from the tree enters (and refreshes) the git view.
+    git.0.borrow_mut().add(ChangeKind::Added, "new.txt", Some(t(950)));
+    assert_eq!(app.handle_key(ctrl('g'), t(1001)), Flow::Continue);
+    assert!(app.in_git_view());
+    assert!(!app.in_file_tree());
+    let screen = app.screen(60, 6, t(1001));
+    assert!(row_text(&screen, 0).starts_with("A new.txt"), "{}", row_text(&screen, 0));
+
+    // Ctrl-T from the git view enters the tree.
+    assert_eq!(app.handle_key(ctrl('t'), t(1001)), Flow::Continue);
+    assert!(app.in_file_tree());
+    assert!(!app.in_git_view());
+    assert!(app.screen(60, 6, t(1001)).status.starts_with("Files: "));
+
+    // Ctrl-G inside the git view still returns to the editor.
+    app.handle_key(ctrl('g'), t(1002));
+    assert!(app.in_git_view());
+    app.handle_key(ctrl('g'), t(1002));
+    assert!(!app.in_git_view());
+    assert!(!app.in_file_tree());
+    assert_eq!(app.editor().buffer().text(), "");
+}
+
+#[test]
+fn tree_keeps_expansion_and_selection_between_visits() {
+    let dir = Temp::new("tree-keep");
+    dir.file("sub/inner.txt", "inner\n");
+    dir.file("z.txt", "z");
+    let mut app = tree_app(&dir, "");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(key(KeyCode::Right), t(1000)); // expand sub
+    app.handle_key(key(KeyCode::Down), t(1000)); // select sub/inner.txt
+    app.handle_key(ch('q'), t(1000));
+    assert!(!app.in_file_tree());
+
+    app.handle_key(ctrl('t'), t(1001));
+    let screen = app.screen(60, 6, t(1001));
+    assert_eq!(rows(&screen)[0], "v sub/");
+    assert_eq!(selected_row(&screen).as_deref(), Some("    inner.txt"));
+    app.handle_key(key(KeyCode::Enter), t(1001));
+    assert!(!app.in_file_tree());
+    assert_eq!(app.editor().buffer().path(), Some(dir.0.join("sub/inner.txt").as_path()));
+}
+
+#[test]
+fn enter_on_file_in_tree_loads_it_and_returns_to_editor() {
+    let dir = Temp::new("tree-open");
+    dir.file("a.txt", "from disk\n");
+    let mut app = tree_app(&dir, "");
+    app.handle_key(ctrl('t'), t(1000));
+    assert_eq!(app.handle_key(key(KeyCode::Enter), t(1000)), Flow::Continue);
+    assert!(!app.in_file_tree());
+    assert!(!app.in_git_view());
+    assert_eq!(app.editor().buffer().text(), "from disk\n");
+    assert_eq!(app.editor().buffer().path(), Some(dir.0.join("a.txt").as_path()));
+    assert!(!app.editor().buffer().is_modified());
+}
+
+#[test]
+fn enter_on_file_with_unsaved_changes_refuses_and_shows_message_in_tree() {
+    let dir = Temp::new("tree-unsaved");
+    dir.file("a.txt", "from disk\n");
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "draft");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert!(app.in_file_tree());
+    assert_eq!(app.screen(60, 6, t(1000)).message, "Unsaved changes: save or quit first");
+    assert_eq!(app.editor().buffer().text(), "draft");
+    assert!(app.editor().buffer().is_modified());
+}
+
+#[test]
+fn enter_on_file_that_vanished_shows_file_no_longer_exists_in_tree() {
+    let dir = Temp::new("tree-vanished");
+    dir.file("a.txt", "x");
+    let mut app = tree_app(&dir, "");
+    app.handle_key(ctrl('t'), t(1000));
+    fs::remove_file(dir.0.join("a.txt")).unwrap();
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert!(app.in_file_tree());
+    assert_eq!(app.screen(60, 6, t(1000)).message, "File no longer exists");
+    assert_eq!(app.editor().buffer().path(), None);
+    assert!(!dir.0.join("a.txt").exists());
+}
+
+#[test]
+fn enter_on_unreadable_file_in_tree_shows_open_failed() {
+    let dir = Temp::new("tree-unreadable");
+    fs::write(dir.0.join("a.txt"), [0xff, 0xfe, 0x00]).unwrap();
+    let mut app = tree_app(&dir, "keep");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert!(app.in_file_tree());
+    let message = app.screen(80, 6, t(1000)).message;
+    assert!(message.starts_with("Open failed: "), "{message}");
+    assert_eq!(app.editor().buffer().text(), "keep");
+}
+
+#[test]
+fn ctrl_q_in_tree_follows_editor_quit_rules() {
+    let dir = Temp::new("tree-quit");
+    dir.file("a.txt", "x");
+
+    // Clean buffer: one press quits.
+    let mut app = tree_app(&dir, "clean");
+    app.handle_key(ctrl('t'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+
+    // Modified buffer: the first press warns in the tree, the second quits.
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "x");
+    app.handle_key(ctrl('t'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    assert!(app.in_file_tree());
+    let message = app.screen(80, 6, t(1000)).message;
+    assert!(message.contains("Unsaved"), "{message}");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+
+    // Any other key in between cancels the warning, as in the editor.
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "x");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ctrl('q'), t(1000));
+    app.handle_key(key(KeyCode::Down), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+
+    // Leaving the tree cancels it too.
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "x");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ctrl('q'), t(1000));
+    app.handle_key(ch('q'), t(1000));
+    assert!(!app.in_file_tree());
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+
+    // Switching to the git view cancels it as well.
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "x");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ctrl('q'), t(1000));
+    app.handle_key(ctrl('g'), t(1000));
+    assert!(app.in_git_view());
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+}
+
+#[test]
+fn entering_tree_cancels_a_pending_quit_warning() {
+    let dir = Temp::new("tree-cancel");
+    dir.file("a.txt", "x");
+
+    // Armed in the editor.
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "x");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    app.handle_key(ctrl('t'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    let message = app.screen(80, 6, t(1000)).message;
+    assert!(message.contains("Unsaved"), "{message}");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+
+    // Armed in the git view, then Ctrl-T to the tree.
+    let mut app = tree_app(&dir, "");
+    type_str(&mut app, "x");
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(ctrl('q'), t(1000));
+    app.handle_key(ctrl('t'), t(1000));
+    assert!(app.in_file_tree());
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+}
+
+#[test]
+fn tick_refreshes_tree_so_new_files_appear() {
+    let dir = Temp::new("tree-tick");
+    dir.file("a.txt", "x");
+    let git = Shared::new(one_file());
+    let mut app = App::new(Editor::new(Buffer::new()), dir.0.clone(), Box::new(git.clone()));
+    app.handle_key(ctrl('t'), t(1000));
+    dir.file("b.txt", "y");
+    assert!(!rows(&app.screen(60, 6, t(1000))).iter().any(|r| r.contains("b.txt")));
+    app.tick(t(1001));
+    assert!(rows(&app.screen(60, 6, t(1001))).iter().any(|r| r.contains("b.txt")));
+    // The tree's tick does not poll git.
+    assert!(git.0.borrow().diff_calls.borrow().is_empty());
+}
+
+#[test]
+fn tick_does_nothing_in_editor_mode() {
+    let dir = Temp::new("tree-tick-editor");
+    dir.file("a.txt", "x");
+    let mut app = tree_app(&dir, "");
+    // Before the tree was ever opened, tick does not create it.
+    app.tick(t(1000));
+    assert!(app.file_tree.is_none());
+
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ch('q'), t(1000));
+    dir.file("b.txt", "y");
+    app.tick(t(1001));
+    let tree = app.file_tree.as_ref().unwrap();
+    assert!(!tree.visible().iter().any(|r| r.name == "b.txt"));
+    assert!(app.screen(20, 4, t(1001)).cursor.is_some());
+}
+
+#[test]
+fn screen_in_tree_mode_never_panics_for_tiny_sizes() {
+    let dir = Temp::new("tree-tiny");
+    dir.file("sub/inner.txt", "x");
+    dir.file("a long file name.txt", "x");
+    let mut app = tree_app(&dir, "abc");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(key(KeyCode::Right), t(1000));
+    assert!(app.in_file_tree());
+    for w in 0..=5 {
+        for h in 0..=5 {
+            let screen = app.screen(w, h, t(1000));
+            assert!(screen.rows.len() <= h);
+            assert!(screen.rows.iter().all(|r| r.iter().map(|s| s.text.chars().count()).sum::<usize>() <= w));
+            assert!(screen.status.chars().count() <= w);
+            assert!(screen.message.chars().count() <= w);
+        }
+    }
+}

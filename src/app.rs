@@ -1,4 +1,4 @@
-//! The editor plus the git view, and which of the two is showing.
+//! The editor plus the git view and the file tree, and which one is showing.
 
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -7,27 +7,44 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
 use crate::editor::{Editor, Flow, View};
+use crate::filetree::{FileTree, TreeAction};
 use crate::git::Git;
 use crate::gitview::{GitAction, GitView};
 use crate::screen::{Screen, Span, Style};
 
+/// Which view is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Editor,
+    GitView,
+    Files,
+}
+
 pub struct App {
     editor: Editor,
-    /// Directory the git view looks at; opened paths are relative to it.
+    /// Directory the git view and the file tree look at; opened paths are
+    /// relative to it.
     location: PathBuf,
     git: Box<dyn Git>,
     /// Created on the first Ctrl-G and kept, so the baseline survives.
     git_view: Option<GitView>,
-    in_git_view: bool,
+    /// Created on the first Ctrl-T and kept, so expansion and selection
+    /// survive between visits.
+    file_tree: Option<FileTree>,
+    mode: Mode,
 }
 
 impl App {
     pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
-        App { editor, location, git, git_view: None, in_git_view: false }
+        App { editor, location, git, git_view: None, file_tree: None, mode: Mode::Editor }
     }
 
     pub fn in_git_view(&self) -> bool {
-        self.in_git_view
+        self.mode == Mode::GitView
+    }
+
+    pub fn in_file_tree(&self) -> bool {
+        self.mode == Mode::Files
     }
 
     pub fn editor(&self) -> &Editor {
@@ -36,9 +53,13 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent, now: SystemTime) -> Flow {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        if !self.in_git_view {
+        if self.mode == Mode::Editor {
             if ctrl && key.code == KeyCode::Char('g') {
                 self.enter_git_view(now);
+                return Flow::Continue;
+            }
+            if ctrl && key.code == KeyCode::Char('t') {
+                self.enter_file_tree();
                 return Flow::Continue;
             }
             return self.editor.handle_key(key);
@@ -47,39 +68,66 @@ impl App {
         // Ctrl-Q follows the editor's quit rules; its warning shows here.
         if ctrl && key.code == KeyCode::Char('q') {
             let flow = self.editor.handle_key(key);
-            if let Some(view) = &mut self.git_view {
-                view.set_message(self.editor.message().to_string());
-            }
+            self.set_view_message(self.editor.message().to_string());
             return flow;
         }
         // Any other key cancels a pending quit warning, as in the editor.
         self.editor.cancel_quit();
 
-        let Some(view) = &mut self.git_view else {
-            self.in_git_view = false;
-            return Flow::Continue;
-        };
-        match view.handle_key(key, self.git.as_ref(), now) {
-            GitAction::None => {}
-            GitAction::Back => self.in_git_view = false,
-            GitAction::Open(rel) => self.open(&rel),
+        match self.mode {
+            Mode::Editor => {}
+            Mode::GitView => {
+                if ctrl && key.code == KeyCode::Char('t') {
+                    self.enter_file_tree();
+                    return Flow::Continue;
+                }
+                let Some(view) = &mut self.git_view else {
+                    self.mode = Mode::Editor;
+                    return Flow::Continue;
+                };
+                match view.handle_key(key, self.git.as_ref(), now) {
+                    GitAction::None => {}
+                    GitAction::Back => self.mode = Mode::Editor,
+                    GitAction::Open(rel) => self.open(&rel),
+                }
+            }
+            Mode::Files => {
+                let Some(tree) = &mut self.file_tree else {
+                    self.mode = Mode::Editor;
+                    return Flow::Continue;
+                };
+                match tree.handle_key(key) {
+                    TreeAction::None => {}
+                    TreeAction::Back => self.mode = Mode::Editor,
+                    TreeAction::ToggleGit => self.enter_git_view(now),
+                    TreeAction::Open(rel) => self.open(&rel),
+                }
+            }
         }
         Flow::Continue
     }
 
-    /// Polls git while the git view is showing; does nothing otherwise.
+    /// Refreshes the view that is showing; does nothing in the editor.
     pub fn tick(&mut self, now: SystemTime) {
-        if !self.in_git_view {
-            return;
-        }
-        if let Some(view) = &mut self.git_view {
-            view.refresh(self.git.as_ref(), now);
+        match self.mode {
+            Mode::Editor => {}
+            Mode::GitView => {
+                if let Some(view) = &mut self.git_view {
+                    view.refresh(self.git.as_ref(), now);
+                }
+            }
+            Mode::Files => {
+                if let Some(tree) = &mut self.file_tree {
+                    tree.refresh();
+                }
+            }
         }
     }
 
     pub fn screen(&mut self, width: usize, height: usize, now: SystemTime) -> Screen {
-        match &self.git_view {
-            Some(view) if self.in_git_view => view.render(width, height, now),
+        match (self.mode, &self.git_view, &self.file_tree) {
+            (Mode::GitView, Some(view), _) => view.render(width, height, now),
+            (Mode::Files, _, Some(tree)) => tree.render(width, height),
             _ => editor_screen(self.editor.view(width, height)),
         }
     }
@@ -89,31 +137,62 @@ impl App {
         self.editor.cancel_quit();
         let view = self.git_view.get_or_insert_with(GitView::new);
         view.refresh(self.git.as_ref(), now);
-        self.in_git_view = true;
+        self.mode = Mode::GitView;
     }
 
-    /// Opens `rel` in the editor, unless that would discard unsaved edits.
+    fn enter_file_tree(&mut self) {
+        // Ctrl-T is a key like any other: it cancels a pending quit warning.
+        self.editor.cancel_quit();
+        match &mut self.file_tree {
+            Some(tree) => tree.refresh(),
+            // `new` lists the root, so a fresh tree needs no extra refresh.
+            None => self.file_tree = Some(FileTree::new(self.location.clone())),
+        }
+        self.mode = Mode::Files;
+    }
+
+    /// Shows `message` in the view that is showing (not in the editor).
+    fn set_view_message(&mut self, message: String) {
+        match self.mode {
+            Mode::Editor => {}
+            Mode::GitView => {
+                if let Some(view) = &mut self.git_view {
+                    view.set_message(message);
+                }
+            }
+            Mode::Files => {
+                if let Some(tree) = &mut self.file_tree {
+                    tree.set_message(message);
+                }
+            }
+        }
+    }
+
+    /// Opens `rel` (relative to `location`) in the editor and returns to it.
+    /// A refusal is shown in the view that asked, which stays showing.
     fn open(&mut self, rel: &str) {
-        let Some(view) = &mut self.git_view else { return };
+        match self.load(rel) {
+            Ok(buffer) => {
+                self.editor.load(buffer);
+                self.mode = Mode::Editor;
+            }
+            Err(message) => self.set_view_message(message),
+        }
+    }
+
+    /// Reads `rel` from disk, unless that would discard unsaved edits.
+    fn load(&self, rel: &str) -> Result<Buffer, String> {
         if self.editor.buffer().is_modified() {
-            view.set_message("Unsaved changes: save or quit first".to_string());
-            return;
+            return Err("Unsaved changes: save or quit first".to_string());
         }
         // `Buffer::open` treats a missing file as new, and a later save
         // would recreate it. `try_exists` follows symlinks, so a dangling
         // link or an unreadable parent is refused too.
         let path = self.location.join(rel);
         if !matches!(path.try_exists(), Ok(true)) {
-            view.set_message("File no longer exists".to_string());
-            return;
+            return Err("File no longer exists".to_string());
         }
-        match Buffer::open(&path) {
-            Ok(buffer) => {
-                self.editor.load(buffer);
-                self.in_git_view = false;
-            }
-            Err(e) => view.set_message(format!("Open failed: {e}")),
-        }
+        Buffer::open(&path).map_err(|e| format!("Open failed: {e}"))
     }
 }
 

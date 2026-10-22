@@ -225,6 +225,13 @@ fn rust_line(state: LineState, line: &str) -> (Vec<Token>, LineState) {
                 let mut end = n;
                 while j < n {
                     match chars[j] {
+                        // Skip quoted strings so a `]` inside one does not end
+                        // the attribute; an unterminated one runs to the end
+                        // of the line, as does an unmatched `[`.
+                        '"' => {
+                            j = scan_str(&chars, j + 1).0;
+                            continue;
+                        }
                         '[' => depth += 1,
                         ']' => {
                             depth = depth.saturating_sub(1);

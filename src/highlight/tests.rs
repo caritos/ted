@@ -232,6 +232,22 @@ fn attributes() {
 }
 
 #[test]
+fn attribute_brackets_inside_strings_do_not_end_it() {
+    let attr = r#"#[doc = "a]b"]"#;
+    assert_eq!(render(&format!("{attr} fn")), format!("{}.kk", all('m', attr)));
+    let attr = r#"#[doc = "a\"]b"]"#;
+    assert_eq!(render(&format!("{attr} x")), format!("{}..", all('m', attr)));
+    let attr = r#"#![doc = "[", x]"#;
+    assert_eq!(render(&format!("{attr} fn")), format!("{}.kk", all('m', attr)));
+    // An unterminated string inside an attribute: Meta to the end of this
+    // line only; the next line starts Normal (render checks the state).
+    let s = r#"#[doc = "a] fn x"#;
+    assert_eq!(render(s), all('m', s));
+    let s = r#"#[doc = "a\"#;
+    assert_eq!(render(s), all('m', s));
+}
+
+#[test]
 fn unicode_gives_one_token_per_char() {
     let s = "\"h\u{e9}llo \u{1F600} \u{4e16}\u{754c}\"";
     assert_eq!(render(s), all('s', s));

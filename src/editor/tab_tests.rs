@@ -11,7 +11,9 @@ fn plain(text: &str) -> Editor {
 }
 
 fn rs_editor(text: &str) -> Editor {
-    let dir = std::env::temp_dir().join(format!("ted-tabs-{}-{}", std::process::id(), text.len()));
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!("ted-tabs-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("x.rs");
@@ -109,9 +111,24 @@ fn cursor_stays_inside_the_text_width_with_tabs() {
                 e.handle_key(key(code));
                 let v = e.view(width, 6);
                 assert!(v.cursor.1 < width, "width {width} cursor {:?}", v.cursor);
+                // The gutter is 4 columns here (<= 999 lines) when it fits.
+                let g = if gutter && width >= 14 { 4 } else { 0 };
                 for (i, line) in v.lines.iter().enumerate() {
                     assert!(line.chars().count() <= width, "width {width} row {i}: {line:?}");
+                    assert!(line.chars().count() <= g + (width - g), "width {width} row {i}");
+                    let text_len = line.chars().skip(g).count();
+                    assert!(text_len <= width - g, "width {width} row {i}: {line:?}");
                     assert_eq!(v.styles[i].len(), line.chars().count());
+                }
+                // The cursor cell shows the cursor's char (a tab as a space),
+                // or sits just past the end of the row at end of line.
+                let (crow, ccol) = e.buffer.cursor();
+                let chars: Vec<char> = e.buffer.line(crow).chars().collect();
+                let drawn: Vec<char> = v.lines[v.cursor.0].chars().collect();
+                let cell = v.cursor.1;
+                match chars.get(ccol) {
+                    Some(&c) => assert_eq!(drawn.get(cell), Some(&crate::text::sanitize_char(c)), "width {width} gutter {gutter}"),
+                    None => assert_eq!(drawn.len(), cell, "width {width} gutter {gutter}"),
                 }
             }
         }
@@ -135,6 +152,15 @@ fn a_tab_inside_a_comment_is_comment_styled() {
     assert_eq!(v.lines[0], "a // x  y");
     assert!(v.styles[0][2..].iter().all(|s| *s == Style::Comment), "{:?}", v.styles[0]);
     assert_eq!(v.styles[0][0], Style::Normal);
+}
+
+#[test]
+fn a_tab_inside_a_string_is_string_styled() {
+    let mut e = rs_editor("let s = \"a\tb\";");
+    let v = e.view(30, 4);
+    assert_eq!(v.lines[0], "let s = \"a  b\";");
+    // Quote is cell 8, `a` 9, tab cells 10-11, `b` 12, closing quote 13.
+    assert!(v.styles[0][8..14].iter().all(|s| *s == Style::Str), "{:?}", v.styles[0]);
 }
 
 #[test]

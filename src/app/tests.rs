@@ -1175,3 +1175,129 @@ fn saving_after_the_quit_warning_lets_quit_through() {
     app.handle_key(ctrl('s'), t(1000));
     assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
 }
+
+// ---- Buffer list ----
+
+fn screen_rows(app: &mut App) -> Vec<String> {
+    rows(&app.screen(40, 10, t(1000)))
+}
+
+#[test]
+fn ctrl_o_lists_buffers_with_selection_on_current_and_q_esc_ctrl_o_return() {
+    let dir = Temp::new("list-open");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    for back in [ch('q'), key(KeyCode::Esc), ctrl('o')] {
+        app.handle_key(ctrl('o'), t(1000));
+        assert!(app.in_buffer_list());
+        let screen = app.screen(40, 10, t(1000));
+        assert!(screen.status.starts_with("Buffers: 2"), "{}", screen.status);
+        assert_eq!(row_text(&screen, 0).trim_end(), "  1  a.txt");
+        assert_eq!(selected_row(&screen).unwrap(), "> 2  b.txt");
+        app.handle_key(back, t(1000));
+        assert!(!app.in_buffer_list());
+        assert_eq!(app.current_index(), 1);
+    }
+}
+
+#[test]
+fn enter_in_list_switches_and_returns_to_editor() {
+    let dir = Temp::new("list-enter");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    app.handle_key(ctrl('o'), t(1000));
+    app.handle_key(key(KeyCode::Up), t(1000));
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert!(!app.in_buffer_list());
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(app.editor().buffer().text(), "alpha\nsecond\n");
+}
+
+#[test]
+fn list_reflects_buffer_opened_from_tree_and_modified_mark() {
+    let dir = Temp::new("list-tree");
+    let mut app = multi_app(&dir);
+    type_str(&mut app, "X");
+    open_from_tree(&mut app, 2);
+    app.handle_key(ctrl('o'), t(1000));
+    let r = screen_rows(&mut app);
+    assert_eq!(r[0].trim_end(), "  1  a.txt [+]");
+    assert_eq!(r[1].trim_end(), "> 2  c.txt");
+}
+
+#[test]
+fn ctrl_o_works_from_git_view_and_tree() {
+    for view in ['g', 't'] {
+        let dir = Temp::new("list-from-view");
+        let mut app = multi_app(&dir);
+        app.handle_key(ctrl(view), t(1000));
+        app.handle_key(ctrl('o'), t(1000));
+        assert!(app.in_buffer_list());
+        assert!(!app.in_git_view() && !app.in_file_tree());
+    }
+}
+
+#[test]
+fn ctrl_g_and_ctrl_t_in_list_switch_views() {
+    let dir = Temp::new("list-views");
+    let mut app = multi_app(&dir);
+    app.handle_key(ctrl('o'), t(1000));
+    app.handle_key(ctrl('g'), t(1000));
+    assert!(app.in_git_view());
+    app.handle_key(ctrl('o'), t(1000));
+    app.handle_key(ctrl('t'), t(1000));
+    assert!(app.in_file_tree());
+}
+
+#[test]
+fn ctrl_w_in_list_is_ignored_and_ctrl_n_leaves_it() {
+    let dir = Temp::new("list-w");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    app.handle_key(ctrl('o'), t(1000));
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 2);
+    assert!(app.in_buffer_list());
+    app.handle_key(ctrl('n'), t(1000));
+    assert!(!app.in_buffer_list());
+    assert_eq!(app.current_index(), 0);
+}
+
+#[test]
+fn ctrl_q_in_list_warns_in_the_list_and_other_key_cancels() {
+    let dir = Temp::new("list-quit");
+    let mut app = multi_app(&dir);
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('o'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    assert!(app.screen(60, 10, t(1000)).message.contains("1 buffer!"));
+    app.handle_key(key(KeyCode::Down), t(1000));
+    assert_eq!(app.screen(60, 10, t(1000)).message, "");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+}
+
+#[test]
+fn list_selection_resets_to_current_on_each_visit() {
+    let dir = Temp::new("list-reset");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    app.handle_key(ctrl('o'), t(1000));
+    app.handle_key(key(KeyCode::Home), t(1000));
+    app.handle_key(ctrl('o'), t(1000));
+    app.handle_key(ctrl('o'), t(1000));
+    assert_eq!(selected_row(&app.screen(40, 10, t(1000))).unwrap(), "> 2  b.txt");
+}
+
+#[test]
+fn list_screen_and_tick_never_panic_for_tiny_sizes() {
+    let dir = Temp::new("list-tiny");
+    let mut app = multi_app(&dir);
+    app.handle_key(ctrl('o'), t(1000));
+    app.tick(t(1001));
+    for w in 0..=6 {
+        for h in 0..=6 {
+            let _ = app.screen(w, h, t(1000));
+        }
+    }
+}

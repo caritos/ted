@@ -1,5 +1,6 @@
 pub mod app;
 pub mod buffer;
+pub mod bufferlist;
 pub mod editor;
 pub mod filetree;
 pub mod git;

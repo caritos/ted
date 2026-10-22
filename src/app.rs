@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
+use crate::bufferlist::{BufferList, ListAction};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
 use crate::git::Git;
@@ -21,6 +22,7 @@ enum Mode {
     Editor,
     GitView,
     Files,
+    Buffers,
 }
 
 pub struct App {
@@ -36,6 +38,8 @@ pub struct App {
     /// Created on the first Ctrl-T and kept, so expansion and selection
     /// survive between visits.
     file_tree: Option<FileTree>,
+    /// Created on the first Ctrl-O; reset to the current buffer on each visit.
+    buffer_list: Option<BufferList>,
     mode: Mode,
     /// Ctrl-W warned about a modified buffer; the next Ctrl-W closes it.
     close_armed: bool,
@@ -45,7 +49,7 @@ pub struct App {
 
 impl App {
     pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
-        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, mode: Mode::Editor, close_armed: false, quit_armed: false }
+        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, buffer_list: None, mode: Mode::Editor, close_armed: false, quit_armed: false }
     }
 
     pub fn in_git_view(&self) -> bool {
@@ -54,6 +58,10 @@ impl App {
 
     pub fn in_file_tree(&self) -> bool {
         self.mode == Mode::Files
+    }
+
+    pub fn in_buffer_list(&self) -> bool {
+        self.mode == Mode::Buffers
     }
 
     pub fn editor(&self) -> &Editor {
@@ -146,6 +154,10 @@ impl App {
             self.cycle(key.code == KeyCode::Char('n'));
             return Flow::Continue;
         }
+        if ctrl && key.code == KeyCode::Char('o') && self.mode != Mode::Buffers {
+            self.enter_buffer_list();
+            return Flow::Continue;
+        }
         if self.mode == Mode::Editor {
             if ctrl && key.code == KeyCode::Char('g') {
                 self.enter_git_view(now);
@@ -184,6 +196,23 @@ impl App {
                     TreeAction::Open(rel) => self.open(&rel),
                 }
             }
+            Mode::Buffers => {
+                let n = self.editors.len();
+                let Some(list) = &mut self.buffer_list else {
+                    self.mode = Mode::Editor;
+                    return Flow::Continue;
+                };
+                match list.handle_key(key, n) {
+                    ListAction::None => {}
+                    ListAction::Back => self.mode = Mode::Editor,
+                    ListAction::Switch(i) => {
+                        self.current = i.min(n - 1);
+                        self.mode = Mode::Editor;
+                    }
+                    ListAction::ToggleGit => self.enter_git_view(now),
+                    ListAction::ToggleTree => self.enter_file_tree(),
+                }
+            }
         }
         Flow::Continue
     }
@@ -202,6 +231,7 @@ impl App {
                     tree.refresh();
                 }
             }
+            Mode::Buffers => {}
         }
     }
 
@@ -212,6 +242,11 @@ impl App {
         match (self.mode, &self.git_view, &self.file_tree) {
             (Mode::GitView, Some(view), _) => view.render(width, height, now),
             (Mode::Files, _, Some(tree)) => tree.render(width, height),
+            (Mode::Buffers, _, _) if self.buffer_list.is_some() => {
+                let entries: Vec<(String, bool)> = self.editors.iter().map(entry).collect();
+                let list = self.buffer_list.as_ref().expect("checked above");
+                list.render(&entries, self.current, width, height)
+            }
             _ => editor_screen(self.editor_mut().view(width, height)),
         }
     }
@@ -220,6 +255,14 @@ impl App {
         let view = self.git_view.get_or_insert_with(GitView::new);
         view.refresh(self.git.as_ref(), now);
         self.mode = Mode::GitView;
+    }
+
+    fn enter_buffer_list(&mut self) {
+        match &mut self.buffer_list {
+            Some(list) => list.reset(self.current),
+            None => self.buffer_list = Some(BufferList::new(self.current)),
+        }
+        self.mode = Mode::Buffers;
     }
 
     fn enter_file_tree(&mut self) {
@@ -243,6 +286,11 @@ impl App {
             Mode::Files => {
                 if let Some(tree) = &mut self.file_tree {
                     tree.set_message(message);
+                }
+            }
+            Mode::Buffers => {
+                if let Some(list) = &mut self.buffer_list {
+                    list.set_message(message);
                 }
             }
         }
@@ -305,6 +353,16 @@ impl App {
         }
         Buffer::open(&path).map_err(|e| format!("Open failed: {e}"))
     }
+}
+
+/// A buffer's row in the buffer list: file name (or `[No Name]`), modified.
+fn entry(editor: &Editor) -> (String, bool) {
+    let buffer = editor.buffer();
+    let name = buffer
+        .path()
+        .and_then(|p| p.file_name())
+        .map_or_else(|| "[No Name]".to_string(), |n| n.to_string_lossy().into_owned());
+    (name, buffer.is_modified())
 }
 
 /// Whether two paths name the same file: canonical forms when both resolve,

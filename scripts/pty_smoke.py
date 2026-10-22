@@ -188,6 +188,35 @@ send(fd, CTRL_Q)
 drain(fd)
 check("non-repo session exits 0", wait_exit(pid) == 0)
 shutil.rmtree(plain, ignore_errors=True)
+
+# 9. a refresh slower than the tick never blocks keys: `git` first on PATH
+# sleeps 1.1 s per call, longer than the 1 s tick (outside a repo a refresh
+# is one git call).
+slow = tempfile.mkdtemp(prefix="ted-smoke-slowgit-")
+slow_bin = os.path.join(slow, "bin")
+os.mkdir(slow_bin)
+wrapper = os.path.join(slow_bin, "git")
+open(wrapper, "w").write(f'#!/bin/sh\nsleep 1.1\nexec "{shutil.which("git")}" "$@"\n')
+os.chmod(wrapper, 0o755)
+saved_path = os.environ["PATH"]
+os.environ["PATH"] = slow_bin + os.pathsep + saved_path
+pid, fd = spawn([slow])
+os.environ["PATH"] = saved_path
+drain(fd)
+send(fd, CTRL_G)
+drain(fd, 0.4, 2.5)
+start = time.time()
+send(fd, b"q")
+send(fd, CTRL_Q)
+code = None
+while code is None and time.time() - start < 5:
+    drain(fd, 0.1, 0.3)
+    code = wait_exit(pid, 0.1)
+check("slow git: q then Ctrl-Q exits promptly", code == 0, f"code {code} after {time.time() - start:.1f}s")
+if code is None:
+    os.kill(pid, 9)
+    os.waitpid(pid, 0)
+shutil.rmtree(slow, ignore_errors=True)
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

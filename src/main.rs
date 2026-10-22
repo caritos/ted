@@ -73,19 +73,21 @@ fn run(mut app: App) -> io::Result<()> {
             drawn = Some((screen, size));
         }
 
-        let now = Instant::now();
-        if now >= next_tick {
-            app.tick(SystemTime::now());
-            next_tick = now + TICK;
-            continue;
-        }
-        // Anything other than a key press (including a resize) just redraws.
-        if event::poll(next_tick - now)?
+        // Input is always polled before a tick may run (with a zero timeout
+        // once the deadline has passed), so a slow refresh delays the next
+        // one but never blocks keys. Anything other than a key press
+        // (including a resize) just redraws.
+        if event::poll(next_tick.saturating_duration_since(Instant::now()))?
             && let Event::Key(key) = event::read()?
             && key.kind != KeyEventKind::Release
             && app.handle_key(key, SystemTime::now()) == Flow::Quit
         {
             return Ok(());
+        }
+        if Instant::now() >= next_tick {
+            app.tick(SystemTime::now());
+            // Measured after the tick, so the next one waits a full TICK.
+            next_tick = Instant::now() + TICK;
         }
     }
 }
@@ -112,8 +114,7 @@ fn draw(out: &mut Stdout, screen: &Screen, height: u16) -> io::Result<()> {
             MoveTo(0, y),
             SetAttribute(Attribute::Reverse),
             Print(&screen.status),
-            SetAttribute(Attribute::NoReverse),
-            Clear(ClearType::UntilNewLine)
+            SetAttribute(Attribute::NoReverse)
         )?;
         y += 1;
     }

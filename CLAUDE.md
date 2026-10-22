@@ -25,12 +25,12 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Rust comes from rustup via Homebrew; if `cargo` is missing, `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`.
 
 ## Rules
-- TDD: failing test first. Logic goes in the library (`buffer`, `bufferlist`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`, `screen`, `highlight`) so it is testable without a terminal.
+- TDD: failing test first. Logic goes in the library (`buffer`, `bufferlist`, `editor`, `git`, `gitview`, `help`, `filetree`, `text`, `app`, `screen`, `highlight`) so it is testable without a terminal.
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
 ### 2026-10-22 (help screen)
-- Done (unit-tested, 317 tests in total, 19 new: 10 in `help.rs`, 9 in `src/app/tests/help.rs`): F1 opens a scrollable help from the editor, git view, file tree and buffer list; `?` also from the three views (types `?` in the editor); `q`/Esc/F1/`?` return to the origin mode; Ctrl-Q follows the app quit rules, Ctrl-N/P/O/G/T leave help, Ctrl-W ignored; table checked against a hard-coded key list; 0..=6 x 0..=6 sweeps; initial `F1: help` message cleared by the first key.
+- Done (unit-tested, 320 tests in total, 22 new: 10 in `help.rs`, 9 in `src/app/tests/help.rs`): F1 opens a scrollable help from the editor, git view, file tree and buffer list; `?` also from the three views (types `?` in the editor); `q`/Esc/F1/`?` return to the origin mode; Ctrl-Q follows the app quit rules, Ctrl-N/P/O/G/T leave help, Ctrl-W ignored; table checked against a hard-coded key list; 0..=6 x 0..=6 sweeps; initial `F1: help` message cleared by the first key.
 - Done (pty smoke, 70 checks, 5 new): hint shown, F1 shows the Help screen with `Ctrl-S` and `Ctrl-Q`, `q` returns to the editor text, exit 0. Seen failing (4 of 5) against the previously installed `~/.cargo/bin/ted`, which lacks F1. Found by the pty run: Ctrl-Q was below the fold on 24 rows, so the Quit section now sits right after Editor (unit test pins it).
 - Not yet verified by hand: how the help looks and scrolls in a real terminal, F1 over ssh/tmux (some terminals send other sequences for F1), the pty's `q`-returns check is weak on its own (it also passes on the old binary, where `q` is typed text).
 - Deferred: search in help, a mouse wheel, per-mode help (it shows every key always), help text for syntax highlighting.

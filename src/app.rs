@@ -50,6 +50,8 @@ pub struct App {
     help: Help,
     /// The mode F1 was pressed in; closing help returns there.
     help_from: Mode,
+    /// The `F1: help` hint is still waiting for the first key.
+    hint_pending: bool,
 }
 
 impl App {
@@ -69,6 +71,7 @@ impl App {
             quit_armed: false,
             help: Help::new(),
             help_from: Mode::Editor,
+            hint_pending: true,
         }
     }
 
@@ -83,7 +86,7 @@ impl App {
         if self.mode == Mode::Editor {
             self.editor_mut().set_message(String::new());
         }
-        self.close_picker();
+        // The commit picker stays open, so closing help returns to it.
         self.help_from = self.mode;
         self.help.reset();
         self.mode = Mode::Help;
@@ -170,6 +173,14 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, now: SystemTime) -> Flow {
+        // The first key of any kind removes the startup hint, wherever it lands.
+        if std::mem::take(&mut self.hint_pending) {
+            for editor in &mut self.editors {
+                if editor.message() == "F1: help" {
+                    editor.set_message(String::new());
+                }
+            }
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let is_quit = ctrl && key.code == KeyCode::Char('q');
         // Any key but Ctrl-Q withdraws a pending quit warning.
@@ -269,7 +280,10 @@ impl App {
                 HelpAction::None => {}
                 HelpAction::Back => self.mode = self.help_from,
                 HelpAction::ToggleGit => self.enter_git_view(now),
-                HelpAction::ToggleTree => self.enter_file_tree(),
+                HelpAction::ToggleTree => {
+                    self.close_picker();
+                    self.enter_file_tree();
+                }
             },
         }
         Flow::Continue

@@ -77,7 +77,7 @@ Files ending in `.rs` are drawn with colors from the terminal's ANSI palette, so
 
 ## Help
 
-Press F1 to see every key. The editor shows `F1: help` in its message row until your first key press. F1 works from the editor, the git view, the file tree and the buffer list, and `?` also opens it from those three views (in the editor `?` is just text). The help screen lists the keys in sections (Editor, Quit, Files and buffers, Views); lines longer than the window are cut, not wrapped.
+Press F1 to see every key. The editor shows `F1: help` in its message row until your first key press. F1 works from the editor, the git view, the file tree and the buffer list, and `?` also opens it from those three views (in the editor `?` is just text). The help screen lists the keys in sections (Editor, Quit, Help, Files and buffers, Views); lines longer than the window are cut, not wrapped. Other keys (Ctrl-S, typing and so on) are ignored while help is showing. Opened from the commit picker (`b` in the git view), closing help returns to the picker.
 
 | Key (help) | Action |
 |---|---|
@@ -144,7 +144,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 317 unit tests
+cargo test                                   # 320 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```

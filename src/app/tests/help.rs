@@ -164,6 +164,51 @@ fn hint_shows_initially_and_goes_after_one_key() {
 }
 
 #[test]
+fn hint_goes_on_the_first_key_of_any_kind() {
+    for first in [ctrl('g'), ctrl('t'), ctrl('o'), ctrl('n'), ctrl('s')] {
+        let mut app = text_app("one", one_file());
+        app.handle_key(first, t(1000));
+        app.handle_key(ch('q'), t(1000));
+        let message = app.screen(80, 24, t(1000)).message;
+        assert!(!message.contains("F1: help"), "{first:?}: {message:?}");
+    }
+}
+
+#[test]
+fn help_from_the_commit_picker_returns_to_the_open_picker() {
+    let mut git = one_file();
+    git.log = vec![Commit {
+        hash: "c1".to_string(),
+        short: "c1".to_string(),
+        subject: "first".to_string(),
+        unix_time: 900,
+        refs: Vec::new(),
+    }];
+    let mut app = text_app("one", git);
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(ch('b'), t(1000));
+    assert!(app.git_view.as_ref().unwrap().picker_open());
+    app.handle_key(ch('?'), t(1000));
+    assert!(app.in_help());
+    app.handle_key(ch('q'), t(1000));
+    assert!(app.in_git_view());
+    assert!(app.git_view.as_ref().unwrap().picker_open());
+}
+
+#[test]
+fn help_lists_its_own_keys_and_printable_insert() {
+    let mut app = text_app("one", one_file());
+    app.handle_key(f1(), t(1000));
+    let all: String = (0..40).map(|i| format!("{}\n", row_text_or_empty(&app.screen(80, 50, t(1000)), i))).collect();
+    assert!(all.contains("Printable keys"), "{all}");
+    assert!(all.contains("Help"), "{all}");
+}
+
+fn row_text_or_empty(screen: &Screen, i: usize) -> String {
+    screen.rows.get(i).map(|r| r.iter().map(|s| s.text.as_str()).collect()).unwrap_or_default()
+}
+
+#[test]
 fn help_tick_and_tiny_sizes_do_not_panic() {
     let mut app = text_app("one", one_file());
     app.handle_key(f1(), t(1000));

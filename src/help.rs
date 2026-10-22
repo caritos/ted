@@ -21,6 +21,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Left / Right / Up / Down", "Move the cursor"),
             ("Home / End", "Start / end of the line"),
             ("PageUp / PageDown", "Move one screenful up / down"),
+            ("Printable keys", "Insert text"),
             ("Enter", "New line"),
             ("Tab", "Insert 4 spaces"),
             ("Backspace / Delete", "Delete before / under the cursor"),
@@ -31,25 +32,34 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
     // Right after Editor so Ctrl-Q is on the first screen of a 24-row terminal.
     ("Quit", &[("Ctrl-Q", "Quit; with unsaved changes press it again")]),
     (
+        "Help",
+        &[
+            ("Up / Down", "Scroll one line"),
+            ("PageUp / PageDown", "Scroll one page"),
+            ("Home / End", "Top / bottom"),
+            ("q / Esc / F1", "Close help"),
+        ],
+    ),
+    (
         "Files and buffers",
         &[
             ("Ctrl-G", "Changes view (again: back)"),
             ("Ctrl-T", "File tree (again: back)"),
             ("Ctrl-O", "Buffer list"),
             ("Ctrl-N / Ctrl-P", "Next / previous buffer"),
-            ("Ctrl-W", "Close the buffer (twice if unsaved)"),
+            ("Ctrl-W", "Close the buffer (editor only; twice if unsaved)"),
         ],
     ),
     (
         "Views",
         &[
             ("Up / Down", "Changes, file tree, buffers: select"),
-            ("PageUp / PageDown", "Scroll the diff / move 10 rows"),
-            ("Home / End", "First / last row"),
+            ("PageUp / PageDown", "Scroll the diff (changes) / move 10 rows (tree)"),
+            ("Home / End", "First / last row (tree, buffer list)"),
             ("Enter", "Open a file, toggle a directory, switch buffer"),
             ("Right / Left", "File tree: expand / collapse"),
             ("r", "Changes view: reset the baseline"),
-            ("b", "Changes view: pick a baseline commit"),
+            ("b", "Changes view: pick a baseline commit (Enter picks, Esc closes)"),
             ("q / Esc", "Back to the editor"),
             ("?", "Show this help"),
         ],
@@ -172,7 +182,7 @@ mod tests {
         ] {
             assert!(keys.contains(&name), "help table lacks {name}");
         }
-        for title in ["Editor", "Files and buffers", "Views", "Quit"] {
+        for title in ["Editor", "Help", "Files and buffers", "Views", "Quit"] {
             assert!(HELP.iter().any(|(s, _)| *s == title), "no section {title}");
         }
     }

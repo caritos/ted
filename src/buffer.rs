@@ -116,6 +116,16 @@ impl Buffer {
         self.clean != Some(self.undo.len())
     }
 
+    /// True when there is an edit step to undo.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// True when there is an undone step to redo.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
     fn mark_clean(&mut self) {
         self.clean = Some(self.undo.len());
         self.merge_ok = false;

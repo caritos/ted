@@ -184,7 +184,7 @@ Dependencies: `crossterm` (terminal input and output) and `ropey` (text storage)
 Design rule: all logic lives in the library (`buffer`, `bufferlist`, `editor`, `git`, `gitview`, `help`, `filetree`, `text`, `app`, `screen`, `highlight`, `command`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
 
 Known simplifications:
-- Undo history is per buffer and lives as long as the buffer; it is lost when an unmodified buffer is reloaded from disk (reopening it from the tree or git view). Saving and `saveas` keep it. Ctrl-Z / Ctrl-Y are ignored in the git view, file tree, buffer list, help and while a prompt is open. Cursor moves are not undone.
+- Undo history is per buffer and lives as long as the buffer; it is lost when an unmodified buffer is reloaded because the file changed on disk (reopening a saved buffer whose file text is unchanged keeps history and cursor). Saving and `saveas` keep it. Ctrl-Z / Ctrl-Y are ignored in the git view, file tree, buffer list, help and while a prompt is open. Cursor moves are not undone.
 - Columns count Rust `char`s, not display cells, so emoji and CJK characters misalign the cursor.
 - "Modified" means the text differs from the last saved state in the undo history: typing and then undoing it is unmodified again; undoing past a save is modified.
 

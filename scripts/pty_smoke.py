@@ -741,7 +741,7 @@ try:
     send(fd, CTRL_Z)
     out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
     check("undo: Ctrl-Z restores abc (one step)", b"  1 abc" in out and b"XY" not in out, out[-300:])
-    check("undo: [+] is gone", b"[+]" not in out, out[-300:])
+    check("undo: [+] is gone", b"u.txt" in out and b"  1 abc" in out and b"[+]" not in out, out[-300:])
     send(fd, CTRL_Y)
     out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
     check("undo: Ctrl-Y brings XYabc and [+] back", b"XYabc" in out and b"[+]" in out, out[-300:])

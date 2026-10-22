@@ -94,18 +94,50 @@ fn save_undo_warns_on_quit_then_redo_quits_at_once() {
 }
 
 #[test]
-fn reopening_an_unmodified_buffer_from_the_tree_drops_its_history() {
-    let dir = Temp::new("undo-reopen");
+fn reopening_a_saved_buffer_with_the_same_text_keeps_history_and_cursor() {
+    let dir = Temp::new("undo-reopen-same");
     dir.file("a.txt", "abc\n");
     dir.file("b.txt", "beta\n");
     let buffer = Buffer::open(&dir.0.join("a.txt")).unwrap();
     let mut app = app_with(Editor::new(buffer), dir.0.clone(), one_file());
     type_str(&mut app, "X");
     app.handle_key(ctrl('s'), t(1000));
-    // a.txt is the first tree entry; it is unmodified, so it is re-read.
+    let cursor = app.editor().buffer().cursor();
     open_from_tree(&mut app, 0);
-    assert_eq!(app.editor().buffer().text(), "Xabc\n");
+    assert_eq!(app.buffer_count(), 1);
+    assert_eq!(app.editor().buffer().cursor(), cursor);
+    app.handle_key(ctrl('z'), t(1000));
+    assert_eq!(app.editor().buffer().text(), "abc\n");
+}
+
+#[test]
+fn reopening_an_unmodified_buffer_whose_file_changed_reloads_and_drops_history() {
+    let dir = Temp::new("undo-reopen-changed");
+    dir.file("a.txt", "abc\n");
+    dir.file("b.txt", "beta\n");
+    let buffer = Buffer::open(&dir.0.join("a.txt")).unwrap();
+    let mut app = app_with(Editor::new(buffer), dir.0.clone(), one_file());
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('s'), t(1000));
+    dir.file("a.txt", "changed\n");
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.editor().buffer().text(), "changed\n");
     app.handle_key(ctrl('z'), t(1000));
     assert_eq!(msg(&mut app), "Nothing to undo");
-    assert_eq!(app.editor().buffer().text(), "Xabc\n");
+    assert_eq!(app.editor().buffer().text(), "changed\n");
+}
+
+#[test]
+fn opening_a_file_keeps_an_unnamed_buffer_that_can_still_redo() {
+    let dir = Temp::new("undo-unnamed-redo");
+    dir.file("a.txt", "abc\n");
+    let mut app = app_with(Editor::new(Buffer::new()), dir.0.clone(), one_file());
+    type_str(&mut app, "a paragraph");
+    app.handle_key(ctrl('z'), t(1000));
+    assert_eq!(app.editor().buffer().text(), "");
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 2);
+    app.handle_key(ctrl('p'), t(1000));
+    app.handle_key(ctrl('y'), t(1000));
+    assert_eq!(app.editor().buffer().text(), "a paragraph");
 }

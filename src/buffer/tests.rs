@@ -274,3 +274,87 @@ fn save_leaves_no_temp_files_behind() {
     let entries = fs::read_dir(path.parent().unwrap()).unwrap().count();
     assert_eq!(entries, 1);
 }
+
+/// Buffer of `lines` lines "aaaa", cursor at (`row`, `col`), dirty row drained.
+fn at(lines: usize, row: usize, col: usize) -> Buffer {
+    let mut b = Buffer::from_text(&vec!["aaaa"; lines].join("\n"));
+    for _ in 0..row {
+        b.move_down();
+    }
+    for _ in 0..col {
+        b.move_right();
+    }
+    b.take_dirty_row();
+    b
+}
+
+#[test]
+fn a_new_or_opened_buffer_is_dirty_from_row_zero() {
+    let mut b = Buffer::from_text("a\nb");
+    assert_eq!(b.take_dirty_row(), Some(0));
+    assert_eq!(b.take_dirty_row(), None);
+    let path = temp_path("dirty-open");
+    fs::write(&path, "x\ny").unwrap();
+    let mut b = Buffer::open(&path).unwrap();
+    assert_eq!(b.take_dirty_row(), Some(0));
+}
+
+#[test]
+fn moving_and_saving_do_not_mark_rows_dirty() {
+    let path = temp_path("dirty-save");
+    fs::write(&path, "ab\ncd").unwrap();
+    let mut b = Buffer::open(&path).unwrap();
+    b.take_dirty_row();
+    b.move_down();
+    b.move_right();
+    b.move_up();
+    b.move_left();
+    b.save().unwrap();
+    assert_eq!(b.take_dirty_row(), None);
+}
+
+#[test]
+fn edits_mark_their_row_and_joins_or_splits_the_row_before() {
+    let mut b = at(5, 2, 1);
+    b.insert_char('x');
+    assert_eq!(b.take_dirty_row(), Some(2));
+    let mut b = at(5, 2, 1);
+    b.backspace();
+    assert_eq!(b.take_dirty_row(), Some(2));
+    let mut b = at(5, 2, 1);
+    b.delete();
+    assert_eq!(b.take_dirty_row(), Some(2));
+    // Enter splits; Backspace at column 0 and Delete at the end join.
+    let mut b = at(5, 2, 1);
+    b.insert_newline();
+    assert_eq!(b.take_dirty_row(), Some(1));
+    let mut b = at(5, 2, 0);
+    b.backspace();
+    assert_eq!(b.take_dirty_row(), Some(1));
+    let mut b = at(5, 2, 4);
+    b.delete();
+    assert_eq!(b.take_dirty_row(), Some(1));
+    // Row 0 saturates.
+    let mut b = at(5, 0, 4);
+    b.delete();
+    assert_eq!(b.take_dirty_row(), Some(0));
+    let mut b = at(5, 0, 0);
+    b.insert_newline();
+    assert_eq!(b.take_dirty_row(), Some(0));
+}
+
+#[test]
+fn take_dirty_row_returns_the_lowest_row_since_the_last_take() {
+    let mut b = at(10, 6, 0);
+    b.insert_char('x');
+    for _ in 0..3 {
+        b.move_up();
+    }
+    b.insert_char('y');
+    b.move_down();
+    b.insert_char('z');
+    assert_eq!(b.take_dirty_row(), Some(3));
+    assert_eq!(b.take_dirty_row(), None);
+    b.insert_char('w');
+    assert_eq!(b.take_dirty_row(), Some(4));
+}

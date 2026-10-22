@@ -364,3 +364,169 @@ fn multiline_block_comment_state_carries_into_visible_rows_when_scrolled_down() 
     assert_eq!(v.styles[last][5], Style::Comment);
     assert_eq!(v.styles[last][7], Style::Keyword);
 }
+
+fn press(e: &mut Editor, code: KeyCode, times: usize) {
+    for _ in 0..times {
+        e.handle_key(key(code));
+    }
+}
+
+/// The visible styles of `v` computed from scratch, walking every line of
+/// the buffer from line 0 without any cache.
+fn reference_styles(e: &Editor, v: &View, width: usize) -> Vec<Vec<Style>> {
+    let mut state = LineState::default();
+    let mut all = Vec::new();
+    for r in 0..e.buffer.line_count() {
+        let (tokens, next) = highlight_line(Language::Rust, state, &e.buffer.line(r));
+        state = next;
+        all.push(tokens);
+    }
+    (0..v.lines.len())
+        .map(|i| match all.get(e.scroll_row + i) {
+            Some(tokens) => {
+                tokens.iter().skip(e.scroll_col).take(width).map(|t| token_style(*t)).collect()
+            }
+            None => vec![Style::Normal; v.lines[i].chars().count()],
+        })
+        .collect()
+}
+
+/// Small deterministic generator so the edit sequences are reproducible.
+struct Lcg(u64);
+
+impl Lcg {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((self.0 >> 33) as usize) % n
+    }
+}
+
+#[test]
+fn cached_styles_match_a_from_scratch_walk_after_every_edit() {
+    let text: String = (0..60).map(|i| format!("let v{i} = \"s\"; // c\n")).collect();
+    let chars = ['/', '*', '"', '\\', '#', '[', ']', 'r', '\'', 'a', ' '];
+    let sizes = [(30, 8), (12, 5), (50, 20), (20, 3), (40, 4)];
+    for seed in 1..=4u64 {
+        let mut e = named_editor("a.rs", &text);
+        let mut rng = Lcg(seed);
+        for step in 0..400 {
+            match rng.below(14) {
+                0 => press(&mut e, KeyCode::Enter, 1),
+                1 => press(&mut e, KeyCode::Backspace, 1),
+                2 => press(&mut e, KeyCode::Delete, 1),
+                3 => press(&mut e, KeyCode::Up, 1 + rng.below(25)),
+                4 => press(&mut e, KeyCode::Down, 1 + rng.below(25)),
+                5 => press(&mut e, KeyCode::Left, 1),
+                6 => press(&mut e, KeyCode::Right, 1),
+                _ => press(&mut e, KeyCode::Char(chars[rng.below(chars.len())]), 1),
+            }
+            let (w, h) = sizes[rng.below(sizes.len())];
+            let v = e.view(w, h);
+            assert_eq!(v.styles, reference_styles(&e, &v, w), "seed {seed} step {step}");
+        }
+    }
+}
+
+#[test]
+fn opening_and_closing_a_comment_or_string_above_the_viewport_restyles_it() {
+    let text: String = (0..100).map(|i| format!("let x{i} = 1;\n")).collect();
+    let mut e = named_editor("a.rs", &text);
+    let check = |e: &mut Editor, first: Style| {
+        let v = e.view(30, 10);
+        assert_eq!(v.styles, reference_styles(e, &v, 30));
+        assert_eq!(v.styles[0][0], first);
+    };
+    press(&mut e, KeyCode::Down, 90);
+    check(&mut e, Style::Keyword);
+    // Each edit happens at row 10, far above the viewport at rows 81..=90.
+    let edits: [(&[KeyCode], Style); 6] = [
+        (&[KeyCode::Char('/'), KeyCode::Char('*')], Style::Comment),
+        (&[KeyCode::Backspace, KeyCode::Backspace], Style::Keyword),
+        (&[KeyCode::Char('"')], Style::Str),
+        (&[KeyCode::Left, KeyCode::Delete], Style::Keyword),
+        (&[KeyCode::Char('/'), KeyCode::Char('*'), KeyCode::Enter], Style::Comment),
+        (&[KeyCode::Backspace, KeyCode::Backspace, KeyCode::Backspace], Style::Keyword),
+    ];
+    for (keys, first) in edits {
+        press(&mut e, KeyCode::Up, 80);
+        for k in keys {
+            press(&mut e, *k, 1);
+        }
+        press(&mut e, KeyCode::Down, 80);
+        check(&mut e, first);
+    }
+}
+
+#[test]
+fn the_highlight_cache_only_walks_lines_it_has_not_seen() {
+    let text: String = (0..10_000).map(|i| format!("let x{i} = 1;\n")).collect();
+    let mut e = named_editor("big.rs", &text);
+    e.view(80, 40);
+    assert_eq!(e.walked_lines, 0);
+    press(&mut e, KeyCode::Down, 9_999);
+    e.view(80, 40);
+    let cold = e.walked_lines;
+    assert!((9_900..=10_001).contains(&cold), "cold walk {cold}");
+
+    // Moving and scrolling without edits walks nothing.
+    e.walked_lines = 0;
+    for code in [KeyCode::Up, KeyCode::Down, KeyCode::Right, KeyCode::Left] {
+        for _ in 0..100 {
+            press(&mut e, code, 1);
+            e.view(80, 40);
+        }
+    }
+    assert_eq!(e.walked_lines, 0);
+
+    // An edit at the bottom walks only a few lines.
+    press(&mut e, KeyCode::Char('x'), 1);
+    press(&mut e, KeyCode::Enter, 1);
+    press(&mut e, KeyCode::Backspace, 1);
+    e.view(80, 40);
+    assert!(e.walked_lines <= 3, "walked {}", e.walked_lines);
+
+    // An edit at the top re-walks down to the viewport.
+    press(&mut e, KeyCode::Up, 9_999);
+    press(&mut e, KeyCode::Char('y'), 1);
+    press(&mut e, KeyCode::Down, 9_999);
+    e.walked_lines = 0;
+    e.view(80, 40);
+    assert!((9_900..=10_001).contains(&e.walked_lines), "walked {}", e.walked_lines);
+}
+
+#[test]
+fn non_highlighted_buffers_walk_and_cache_nothing() {
+    let text: String = (0..1_000).map(|i| format!("/* x{i}\n")).collect();
+    let mut e = named_editor("big.txt", &text);
+    press(&mut e, KeyCode::Down, 999);
+    e.view(80, 40);
+    assert_eq!(e.walked_lines, 0);
+    assert_eq!(e.line_states.capacity(), 0);
+}
+
+#[test]
+fn load_clears_the_highlight_cache() {
+    let mut text = String::from("/*\n");
+    text.push_str(&"let x = 1;\n".repeat(50));
+    let mut e = named_editor("a.rs", &text);
+    press(&mut e, KeyCode::Down, 50);
+    let v = e.view(30, 10);
+    assert_eq!(v.styles[0][0], Style::Comment);
+    assert!(!e.line_states.is_empty());
+
+    // Same language and shape, but no comment.
+    let dir = temp_file("load").parent().unwrap().to_path_buf();
+    let path = dir.join("b.rs");
+    fs::write(&path, "let x = 1;\n".repeat(51)).unwrap();
+    e.load(Buffer::open(&path).unwrap());
+    assert!(e.line_states.is_empty());
+    press(&mut e, KeyCode::Down, 50);
+    let v = e.view(30, 10);
+    assert_eq!(v.styles, reference_styles(&e, &v, 30));
+    assert_eq!(v.styles[0][0], Style::Keyword);
+
+    // Switching to a non-highlighted buffer leaves the cache empty.
+    e.load(Buffer::from_text(&text));
+    e.view(30, 10);
+    assert!(e.line_states.is_empty());
+}

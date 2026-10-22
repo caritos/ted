@@ -31,6 +31,14 @@ pub struct Editor {
     quit_armed: bool,
     scroll_row: usize,
     scroll_col: usize,
+    /// Highlight state at the start of each line (index = row), valid for
+    /// every entry; extended lazily and truncated at the first edited row.
+    line_states: Vec<LineState>,
+    /// Language `line_states` belongs to; a change clears the cache.
+    highlighted: Option<Language>,
+    /// Lines the cache has walked (test-only instrumentation).
+    #[cfg(test)]
+    walked_lines: usize,
 }
 
 impl Editor {
@@ -41,6 +49,10 @@ impl Editor {
             quit_armed: false,
             scroll_row: 0,
             scroll_col: 0,
+            line_states: Vec::new(),
+            highlighted: None,
+            #[cfg(test)]
+            walked_lines: 0,
         }
     }
 
@@ -53,9 +65,11 @@ impl Editor {
     }
 
     /// Replaces the buffer and starts it fresh: top-left scroll, no message,
-    /// no pending quit warning.
+    /// no pending quit warning, no highlight cache.
     pub fn load(&mut self, buffer: Buffer) {
         self.buffer = buffer;
+        self.line_states = Vec::new();
+        self.highlighted = None;
         self.message.clear();
         self.quit_armed = false;
         self.scroll_row = 0;
@@ -147,30 +161,53 @@ impl Editor {
     }
 
     /// One style per displayed char of `lines` (the clipped visible rows).
-    /// Highlighted languages are tokenized from line 0 so multi-line state
-    /// (block comments, strings) is right at the top of the viewport.
-    fn styles(&self, lines: &[String], width: usize) -> Vec<Vec<Style>> {
+    /// Multi-line state (block comments, strings) at the top of the viewport
+    /// comes from `line_states`, which is cut back to the first edited row
+    /// and then extended only as far as the first visible row.
+    fn styles(&mut self, lines: &[String], width: usize) -> Vec<Vec<Style>> {
         let language = self.buffer.path().and_then(Language::from_path);
+        let dirty = self.buffer.take_dirty_row();
+        if language != self.highlighted {
+            self.line_states = Vec::new();
+            self.highlighted = language;
+        } else if let Some(row) = dirty {
+            // Conservative: the state at the start of `row` is recomputed too.
+            self.line_states.truncate(row);
+        }
         let Some(language) = language.filter(|_| !lines.is_empty()) else {
             return lines.iter().map(|l| vec![Style::Normal; l.chars().count()]).collect();
         };
-        let mut state = LineState::default();
-        for r in 0..self.scroll_row {
-            state = highlight_line(language, state, &self.buffer.line(r)).1;
+
+        if self.line_states.is_empty() {
+            self.line_states.push(LineState::default());
         }
-        lines
-            .iter()
-            .enumerate()
-            .map(|(i, text)| {
-                let r = self.scroll_row + i;
-                if r >= self.buffer.line_count() {
-                    return vec![Style::Normal; text.chars().count()];
-                }
-                let (tokens, next) = highlight_line(language, state, &self.buffer.line(r));
-                state = next;
-                tokens.iter().skip(self.scroll_col).take(width).map(|t| token_style(*t)).collect()
-            })
-            .collect()
+        while self.line_states.len() <= self.scroll_row {
+            let r = self.line_states.len() - 1;
+            let next = highlight_line(language, self.line_states[r], &self.buffer.line(r)).1;
+            self.line_states.push(next);
+            #[cfg(test)]
+            {
+                self.walked_lines += 1;
+            }
+        }
+
+        let mut state = self.line_states[self.scroll_row];
+        let mut rows = Vec::with_capacity(lines.len());
+        for (i, text) in lines.iter().enumerate() {
+            let r = self.scroll_row + i;
+            if r >= self.buffer.line_count() {
+                rows.push(vec![Style::Normal; text.chars().count()]);
+                continue;
+            }
+            let (tokens, next) = highlight_line(language, state, &self.buffer.line(r));
+            state = next;
+            // Remember visible rows too, so scrolling down walks nothing.
+            if self.line_states.len() == r + 1 {
+                self.line_states.push(next);
+            }
+            rows.push(tokens.iter().skip(self.scroll_col).take(width).map(|t| token_style(*t)).collect());
+        }
+        rows
     }
 
     fn save(&mut self) {

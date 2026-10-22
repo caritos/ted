@@ -14,6 +14,8 @@ pub struct Buffer {
     goal_col: usize,
     path: Option<PathBuf>,
     modified: bool,
+    /// Lowest row whose text changed since the last `take_dirty_row`.
+    dirty_row: Option<usize>,
 }
 
 impl Default for Buffer {
@@ -35,6 +37,7 @@ impl Buffer {
             goal_col: 0,
             path: None,
             modified: false,
+            dirty_row: Some(0),
         }
     }
 
@@ -92,7 +95,20 @@ impl Buffer {
         self.modified
     }
 
+    /// The lowest row changed since the last call (a new buffer counts as
+    /// changed from row 0), or `None`. Text at and below that row may differ;
+    /// rows above it are untouched.
+    pub(crate) fn take_dirty_row(&mut self) -> Option<usize> {
+        self.dirty_row.take()
+    }
+
+    /// Records that `row` changed (keeping the lowest such row).
+    fn mark_dirty(&mut self, row: usize) {
+        self.dirty_row = Some(self.dirty_row.map_or(row, |d| d.min(row)));
+    }
+
     pub fn insert_char(&mut self, c: char) {
+        self.mark_dirty(self.row);
         self.rope.insert_char(self.cursor_index(), c);
         self.col += 1;
         self.goal_col = self.col;
@@ -100,6 +116,8 @@ impl Buffer {
     }
 
     pub fn insert_newline(&mut self) {
+        // Splitting a line: be conservative and include the row above.
+        self.mark_dirty(self.row.saturating_sub(1));
         self.rope.insert_char(self.cursor_index(), '\n');
         self.row += 1;
         self.col = 0;
@@ -113,10 +131,13 @@ impl Buffer {
             return;
         }
         if self.col > 0 {
+            self.mark_dirty(self.row);
             self.rope.remove(index - 1..index);
             self.col -= 1;
         } else {
             let prev = self.row - 1;
+            // Joining with the line above: that row changes.
+            self.mark_dirty(prev);
             let break_len = break_len(self.rope.line(prev));
             let prev_len = self.line_len(prev);
             self.rope.remove(index - break_len..index);
@@ -133,8 +154,11 @@ impl Buffer {
             return;
         }
         let end = if self.col < self.line_len(self.row) {
+            self.mark_dirty(self.row);
             index + 1
         } else {
+            // Joining the next line onto this one: include the row above.
+            self.mark_dirty(self.row.saturating_sub(1));
             index + break_len(self.rope.line(self.row))
         };
         self.rope.remove(index..end);

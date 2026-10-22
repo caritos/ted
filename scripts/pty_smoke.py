@@ -11,7 +11,7 @@ import tempfile
 import termios
 import time
 
-BIN = sys.argv[1]
+BIN = os.path.abspath(sys.argv[1])
 CTRL_S, CTRL_Q, CTRL_G = b"\x13", b"\x11", b"\x07"
 failures = []
 
@@ -22,9 +22,11 @@ def check(name, ok, detail=""):
         failures.append(name)
 
 
-def spawn(args):
+def spawn(args, cwd=None):
     pid, fd = pty.fork()
     if pid == 0:
+        if cwd:
+            os.chdir(cwd)
         os.environ["TERM"] = "xterm-256color"
         os.execv(BIN, [BIN] + args)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
@@ -635,6 +637,92 @@ finally:
         except OSError:
             pass
     shutil.rmtree(tp, ignore_errors=True)
+
+# 19. command prompt (Ctrl-X): `lines` toggles the gutter like F2, an unknown
+# command shows its message. Style escapes are stripped as in 17.
+CTRL_X = b"\x18"
+cp = tempfile.mkdtemp(prefix="ted-smoke-cmd-")
+pid = fd = None
+try:
+    p = os.path.join(cp, "n.txt")
+    with open(p, "w") as f:
+        f.write("".join(f"line {n}\n" for n in range(12)))
+    pid, fd = spawn([p])
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("command: gutter shown on start", b"  1 line 0" in out, out[-300:])
+    send(fd, CTRL_X)
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("command: Ctrl-X shows the prompt", b"Command: " in out, out[-300:])
+    send(fd, b"lines\r")
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("command: `lines` hides the gutter (text kept)", b"line 0" in out and b"  1 line 0" not in out and b" 12 line 11" not in out, out[-300:])
+    send(fd, CTRL_X)
+    drain(fd)
+    send(fd, b"lines\r")
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("command: `lines` again restores it", b"  1 line 0" in out and b" 12 line 11" in out, out[-300:])
+    send(fd, CTRL_X)
+    drain(fd)
+    send(fd, b"zzz\r")
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("command: unknown command shows its message", b"Unknown command: zzz" in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("command: exit 0 without changes", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(cp, ignore_errors=True)
+
+# 20. saveas: start without a file in a temp directory, type text, name the
+# buffer from the prompt; the status shows the name and the file has the text.
+sp2 = tempfile.mkdtemp(prefix="ted-smoke-saveas-")
+pid = fd = None
+try:
+    pid, fd = spawn([], cwd=sp2)
+    drain(fd)
+    send(fd, b"hello saveas")
+    drain(fd)
+    send(fd, CTRL_X)
+    drain(fd)
+    send(fd, b"saveas out.txt\r")
+    out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
+    check("saveas: status shows the new name", b"\x1b[23;1H out.txt" in out and b"[No Name]" not in out, out[-300:])
+    check("saveas: message says Saved", b"Saved 1 lines" in out, out[-300:])
+    target = os.path.join(sp2, "out.txt")
+    content = open(target).read() if os.path.exists(target) else None
+    check("saveas: file has the typed text", content == "hello saveas", content)
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("saveas: exit 0 (buffer is saved, no warning)", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(sp2, ignore_errors=True)
 
 shutil.rmtree(tmp, ignore_errors=True)
 

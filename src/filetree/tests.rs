@@ -508,6 +508,26 @@ fn render_status_is_exactly_width_and_shows_root_name_and_count() {
 }
 
 #[test]
+fn root_without_a_file_name_shows_the_real_directory_name() {
+    let d = Temp::new("r-rootname");
+    d.dir("sub");
+    let want = d.0.file_name().unwrap().to_string_lossy().into_owned();
+    // `sub/..` has no `file_name()`, like the `.` used for `ted` alone.
+    let t = FileTree::new(d.0.join("sub/.."));
+    assert_eq!(root_name(&t), want);
+    let s = t.render(200, 6);
+    assert!(s.status.starts_with(&format!("Files: {want}  ")), "{}", s.status);
+}
+
+#[test]
+fn root_name_of_dot_is_the_current_directory_name() {
+    let t = FileTree::new(PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+    let want = cwd.file_name().map_or("/".to_string(), |n| n.to_string_lossy().into_owned());
+    assert_eq!(root_name(&t), want);
+}
+
+#[test]
 fn render_empty_and_unreadable_root_states() {
     let d = Temp::new("r-empty");
     let t = d.tree();

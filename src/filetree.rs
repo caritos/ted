@@ -3,7 +3,7 @@
 //! The tree never creates, renames or deletes anything.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -56,6 +56,8 @@ struct Listing {
 
 pub struct FileTree {
     root: PathBuf,
+    /// The root's display name, worked out once (see `root_name`).
+    root_name: String,
     /// Paths of expanded directories (the root is always expanded).
     expanded: HashSet<String>,
     /// A listing for the root and every expanded directory.
@@ -68,6 +70,7 @@ pub struct FileTree {
 impl FileTree {
     pub fn new(root: PathBuf) -> Self {
         let mut tree = FileTree {
+            root_name: root_name(&root),
             root,
             expanded: HashSet::new(),
             listings: HashMap::new(),
@@ -163,10 +166,7 @@ impl FileTree {
 
     fn display_name(&self, path: &str) -> String {
         if path.is_empty() {
-            return self
-                .root
-                .file_name()
-                .map_or_else(|| self.root.display().to_string(), |n| n.to_string_lossy().into_owned());
+            return self.root_name.clone();
         }
         path.rsplit('/').next().unwrap_or(path).to_string()
     }
@@ -416,6 +416,17 @@ impl FileTree {
         }
         TreeAction::None
     }
+}
+
+/// The last component of `root`. A root such as `.` or `sub/..` has none,
+/// so the real directory's name is used (`canonicalize` resolves it against
+/// the current directory); failing that, the path as given (e.g. `/`).
+/// Rendering sanitizes it like any other name.
+fn root_name(root: &Path) -> String {
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
+    name(root)
+        .or_else(|| root.canonicalize().ok().and_then(|p| name(&p)))
+        .unwrap_or_else(|| root.display().to_string())
 }
 
 fn join(parent: &str, name: &str) -> String {

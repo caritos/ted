@@ -948,3 +948,124 @@ fn status_shows_position_tag_only_with_many() {
     let status = app.screen(40, 6, t(1000)).status;
     assert!(status.contains("[2/3]"), "{status}");
 }
+
+// ---- Ctrl-W close ----
+
+fn three_buffers(dir: &Temp) -> App {
+    let mut app = multi_app(dir);
+    open_from_tree(&mut app, 1);
+    open_from_tree(&mut app, 2);
+    app
+}
+
+fn name_of(app: &App) -> String {
+    app.editor().buffer().path().unwrap().file_name().unwrap().to_string_lossy().to_string()
+}
+
+const CLOSE_WARNING: &str = "Unsaved changes! Press Ctrl-W again to close without saving.";
+
+#[test]
+fn ctrl_w_closes_clean_buffer_and_selects_previous_neighbour() {
+    let dir = Temp::new("close-mid");
+    let mut app = three_buffers(&dir);
+    app.handle_key(ctrl('p'), t(1000)); // b.txt, index 1
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(name_of(&app), "a.txt");
+}
+
+#[test]
+fn ctrl_w_on_last_index_selects_new_last() {
+    let dir = Temp::new("close-last");
+    let mut app = three_buffers(&dir);
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 1);
+    assert_eq!(name_of(&app), "b.txt");
+}
+
+#[test]
+fn ctrl_w_on_first_buffer_keeps_index_zero() {
+    let dir = Temp::new("close-first");
+    let mut app = three_buffers(&dir);
+    app.handle_key(ctrl('n'), t(1000)); // wraps to 0
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(name_of(&app), "b.txt");
+}
+
+#[test]
+fn ctrl_w_on_only_buffer_leaves_one_empty_unnamed_buffer() {
+    let dir = Temp::new("close-only");
+    let mut app = multi_app(&dir);
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 1);
+    assert_eq!(app.current_index(), 0);
+    assert!(app.editor().buffer().path().is_none());
+    assert!(app.editor().buffer().text().is_empty());
+}
+
+#[test]
+fn ctrl_w_on_modified_warns_and_keeps_buffer() {
+    let dir = Temp::new("close-warn");
+    let mut app = three_buffers(&dir);
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 3);
+    assert_eq!(app.screen(80, 6, t(1000)).message, CLOSE_WARNING);
+}
+
+#[test]
+fn another_key_disarms_close() {
+    let dir = Temp::new("close-disarm");
+    let mut app = three_buffers(&dir);
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('w'), t(1000));
+    app.handle_key(key(KeyCode::Left), t(1000));
+    assert_ne!(app.screen(80, 6, t(1000)).message, CLOSE_WARNING);
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 3);
+    assert_eq!(app.screen(80, 6, t(1000)).message, CLOSE_WARNING);
+}
+
+#[test]
+fn second_ctrl_w_discards_modified_buffer() {
+    let dir = Temp::new("close-confirm");
+    let mut app = three_buffers(&dir);
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('w'), t(1000));
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(name_of(&app), "b.txt");
+    assert!(!app.editor().buffer().is_modified());
+    assert!(!app.editors.iter().any(|e| e.buffer().text().contains('X')));
+    assert_ne!(app.screen(80, 6, t(1000)).message, CLOSE_WARNING);
+}
+
+#[test]
+fn switching_buffer_disarms_close() {
+    let dir = Temp::new("close-switch");
+    let mut app = three_buffers(&dir);
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('w'), t(1000));
+    app.handle_key(ctrl('n'), t(1000));
+    app.handle_key(ctrl('p'), t(1000));
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 3);
+}
+
+#[test]
+fn ctrl_w_is_ignored_in_file_tree_and_git_view() {
+    let dir = Temp::new("close-views");
+    let mut app = three_buffers(&dir);
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ctrl('w'), t(1000));
+    assert!(app.in_file_tree());
+    assert_eq!(app.buffer_count(), 3);
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(ctrl('w'), t(1000));
+    assert!(app.in_git_view());
+    assert_eq!(app.buffer_count(), 3);
+}

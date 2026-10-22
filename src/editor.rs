@@ -69,6 +69,10 @@ impl Editor {
         self.tag = tag;
     }
 
+    pub fn set_message(&mut self, message: String) {
+        self.message = message;
+    }
+
     pub fn message(&self) -> &str {
         &self.message
     }

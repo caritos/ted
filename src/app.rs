@@ -37,11 +37,13 @@ pub struct App {
     /// survive between visits.
     file_tree: Option<FileTree>,
     mode: Mode,
+    /// Ctrl-W warned about a modified buffer; the next Ctrl-W closes it.
+    close_armed: bool,
 }
 
 impl App {
     pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
-        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, mode: Mode::Editor }
+        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, mode: Mode::Editor, close_armed: false }
     }
 
     pub fn in_git_view(&self) -> bool {
@@ -77,8 +79,37 @@ impl App {
         self.mode = Mode::Editor;
     }
 
+    /// Closes the current buffer. A modified one needs a second Ctrl-W.
+    /// The previous neighbour (or the first) becomes current; closing the
+    /// last buffer leaves one empty unnamed buffer.
+    fn close_current(&mut self) {
+        if self.editor().buffer().is_modified() && !self.close_armed {
+            self.close_armed = true;
+            self.editor_mut()
+                .set_message("Unsaved changes! Press Ctrl-W again to close without saving.".to_string());
+            return;
+        }
+        self.close_armed = false;
+        self.editors.remove(self.current);
+        if self.editors.is_empty() {
+            self.editors.push(Editor::new(Buffer::new()));
+        }
+        self.current = self.current.saturating_sub(1);
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent, now: SystemTime) -> Flow {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let is_close = ctrl && key.code == KeyCode::Char('w');
+        // Any key but Ctrl-W withdraws a pending close warning.
+        if !is_close && std::mem::take(&mut self.close_armed) {
+            self.editor_mut().set_message(String::new());
+        }
+        if is_close {
+            if self.mode == Mode::Editor {
+                self.close_current();
+            }
+            return Flow::Continue;
+        }
         if ctrl && matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p')) {
             self.cycle(key.code == KeyCode::Char('n'));
             return Flow::Continue;

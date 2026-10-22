@@ -128,6 +128,9 @@ out = drain(fd)
 check("usage error exits 2", wait_exit(pid) == 2 and b"usage" in out, out)
 
 # 7. git view in a repo: changed + untracked files, diff lines, back to editor
+# Hermetic: ignore the user's and system git config (git helper and ted child inherit this).
+os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
+os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
 repo = tempfile.mkdtemp(prefix="ted-smoke-repo-")
 
 

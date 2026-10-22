@@ -69,7 +69,7 @@ scripts/pty_smoke.py   Drives the release binary through a pseudo-terminal.
 
 Dependencies: `crossterm` (terminal input and output) and `ropey` (text storage). There is no `ratatui` on purpose; the editor draws its own screen.
 
-Design rule: all logic lives in `buffer` and `editor` so it can be tested without a terminal. `main.rs` only reads keys and prints.
+Design rule: all logic lives in the library (`buffer`, `editor`, `git`, `gitview`, `app`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
 
 Known simplifications:
 - Columns count Rust `char`s, not display cells, so emoji and CJK characters misalign the cursor.

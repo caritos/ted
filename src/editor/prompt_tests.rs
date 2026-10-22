@@ -65,7 +65,7 @@ fn incremental_search_restarts_from_origin_not_last_match() {
 #[test]
 fn backspace_to_empty_restores_origin() {
     let mut e = ed("one\ntwo\nthree");
-    e.buffer_mut_for_test().set_cursor(1, 1);
+    e.buffer.set_cursor(1, 1);
     e.handle_key(ctrl('f'));
     type_str(&mut e, "three");
     assert_eq!(e.buffer().cursor(), (2, 0));
@@ -252,7 +252,7 @@ fn goto_line_clamps_and_zero_or_empty_is_noop() {
     type_str(&mut e, "999999999999999999999999");
     e.handle_key(key(KeyCode::Enter));
     assert_eq!(e.buffer().cursor(), (2, 0));
-    e.buffer_mut_for_test().set_cursor(1, 0);
+    e.buffer.set_cursor(1, 0);
     e.handle_key(ctrl('l'));
     type_str(&mut e, "0");
     e.handle_key(key(KeyCode::Enter));
@@ -338,6 +338,134 @@ fn utf8_columns_are_char_indexes() {
     e.handle_key(ctrl('f'));
     type_str(&mut e, "wö");
     assert_eq!(e.buffer().cursor(), (0, 6));
+}
+
+/// 200 lines, cursor mid-viewport with scroll_row > 0; returns the editor.
+fn scrolled_editor() -> Editor {
+    let mut e = ed(&many_lines(200));
+    e.view(40, 12);
+    for _ in 0..3 {
+        e.handle_key(key(KeyCode::PageDown));
+    }
+    e.view(40, 12);
+    for _ in 0..4 {
+        e.handle_key(key(KeyCode::Up));
+    }
+    e
+}
+
+/// One long line, cursor mid-line scrolled right, then a short line "needle".
+fn scrolled_right_editor() -> Editor {
+    let long = "abcdefghij".repeat(10);
+    let mut e = ed(&format!("{long}\nneedle"));
+    e.handle_key(key(KeyCode::End));
+    e.view(20, 5);
+    for _ in 0..10 {
+        e.handle_key(key(KeyCode::Left));
+    }
+    e
+}
+
+#[test]
+fn esc_restores_mid_viewport_origin_vertical_scroll() {
+    let mut e = scrolled_editor();
+    let before = e.view(40, 12);
+    assert_eq!(e.buffer().cursor(), (23, 0));
+    assert!(e.scroll_row > 0);
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "line 150");
+    assert_eq!(e.buffer().cursor(), (150, 0));
+    e.view(40, 12);
+    e.handle_key(key(KeyCode::Esc));
+    let after = e.view(40, 12);
+    assert_eq!(e.buffer().cursor(), (23, 0));
+    assert_eq!(after.lines, before.lines);
+    assert_eq!(after.cursor, before.cursor);
+}
+
+#[test]
+fn esc_restores_mid_line_origin_horizontal_scroll() {
+    let mut e = scrolled_right_editor();
+    let before = e.view(20, 5);
+    assert_eq!(e.buffer().cursor(), (0, 90));
+    assert!(e.scroll_col > 0);
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "needle");
+    assert_eq!(e.buffer().cursor(), (1, 0));
+    e.view(20, 5);
+    e.handle_key(key(KeyCode::Esc));
+    let after = e.view(20, 5);
+    assert_eq!(e.buffer().cursor(), (0, 90));
+    assert_eq!(after.lines, before.lines);
+    assert_eq!(after.cursor, before.cursor);
+}
+
+#[test]
+fn cancel_prompt_restores_mid_viewport_scroll() {
+    let mut e = scrolled_editor();
+    let before = e.view(40, 12);
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "line 150");
+    e.view(40, 12);
+    e.cancel_prompt();
+    let after = e.view(40, 12);
+    assert_eq!(after.lines, before.lines);
+    assert_eq!(after.cursor, before.cursor);
+
+    let mut e = scrolled_right_editor();
+    let before = e.view(20, 5);
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "needle");
+    e.view(20, 5);
+    e.cancel_prompt();
+    let after = e.view(20, 5);
+    assert_eq!(after.lines, before.lines);
+    assert_eq!(after.cursor, before.cursor);
+}
+
+#[test]
+fn goto_esc_restores_mid_viewport_scroll() {
+    let mut e = scrolled_editor();
+    let before = e.view(40, 12);
+    e.handle_key(ctrl('l'));
+    type_str(&mut e, "150");
+    e.handle_key(key(KeyCode::Esc));
+    let after = e.view(40, 12);
+    assert_eq!(after.lines, before.lines);
+    assert_eq!(after.cursor, before.cursor);
+}
+
+#[test]
+fn enter_on_not_found_restores_origin_but_remembers_term() {
+    let mut e = ed("zzz\nxx\nab\nend");
+    e.buffer.set_cursor(1, 0);
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "ab");
+    assert_eq!(e.buffer().cursor(), (2, 0));
+    type_str(&mut e, "z");
+    assert_eq!(e.buffer().cursor(), (2, 0));
+    e.handle_key(key(KeyCode::Enter));
+    assert!(!e.in_prompt());
+    assert_eq!(e.buffer().cursor(), (1, 0));
+    e.handle_key(key(KeyCode::F(3)));
+    assert_eq!(e.message(), "Not found: abz");
+}
+
+#[test]
+fn find_on_lone_cr_buffer_has_valid_cursor_and_match_row() {
+    let mut e = ed("a\rfoo\rbar");
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "bar");
+    assert_eq!(e.buffer().cursor(), (2, 0));
+    let v = e.view(20, 6);
+    assert_eq!(v.lines[2], "bar");
+    assert_eq!(v.cursor, (2, 0));
+    type_str(&mut e, "x");
+    assert_eq!(e.view(30, 6).message, "Find: barx (not found)");
+    e.handle_key(key(KeyCode::Esc));
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "foo");
+    assert_eq!(e.buffer().cursor(), (1, 0));
 }
 
 #[test]

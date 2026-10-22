@@ -187,6 +187,9 @@ impl Editor {
             KeyCode::Enter => {
                 match prompt.kind {
                     PromptKind::Find => {
+                        if prompt.status == FindStatus::NotFound {
+                            self.restore_origin(&prompt);
+                        }
                         if !prompt.text.is_empty() {
                             self.last_search = prompt.text;
                         }
@@ -245,11 +248,6 @@ impl Editor {
                 FindStatus::NotFound => format!("Find: {} (not found)", prompt.text),
             },
         }
-    }
-
-    #[cfg(test)]
-    fn buffer_mut_for_test(&mut self) -> &mut Buffer {
-        &mut self.buffer
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Flow {

@@ -34,7 +34,7 @@ fn main() -> ExitCode {
             }
         },
         _ => {
-            eprintln!("usage: ted [file]");
+            eprintln!("usage: ted [file|dir]");
             return ExitCode::from(2);
         }
     };

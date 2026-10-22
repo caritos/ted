@@ -239,12 +239,11 @@ impl App {
         let n = self.editors.len();
         let tag = if n > 1 { format!("[{}/{}]", self.current + 1, n) } else { String::new() };
         self.editor_mut().set_tag(tag);
-        match (self.mode, &self.git_view, &self.file_tree) {
-            (Mode::GitView, Some(view), _) => view.render(width, height, now),
-            (Mode::Files, _, Some(tree)) => tree.render(width, height),
-            (Mode::Buffers, _, _) if self.buffer_list.is_some() => {
+        match (self.mode, &self.git_view, &self.file_tree, &self.buffer_list) {
+            (Mode::GitView, Some(view), _, _) => view.render(width, height, now),
+            (Mode::Files, _, Some(tree), _) => tree.render(width, height),
+            (Mode::Buffers, _, _, Some(list)) => {
                 let entries: Vec<(String, bool)> = self.editors.iter().map(entry).collect();
-                let list = self.buffer_list.as_ref().expect("checked above");
                 list.render(&entries, self.current, width, height)
             }
             _ => editor_screen(self.editor_mut().view(width, height)),
@@ -299,28 +298,29 @@ impl App {
     /// Opens `rel` (relative to `location`) in the editor and returns to it.
     /// A refusal is shown in the view that asked, which stays showing.
     fn open(&mut self, rel: &str) {
-        match self.load(rel) {
+        let path = self.location.join(rel);
+        // An already-open file just becomes current; it is not read again.
+        if let Some(i) = self.position_of(&path) {
+            self.current = i;
+            self.mode = Mode::Editor;
+            return;
+        }
+        match self.load(&path) {
             Ok(buffer) => {
-                self.add_or_switch(buffer);
+                self.add_buffer(buffer);
                 self.mode = Mode::Editor;
             }
             Err(message) => self.set_view_message(message),
         }
     }
 
-    /// Makes `buffer` current: switches to the buffer already holding the
-    /// same file, replaces a lone pristine unnamed buffer, or appends.
-    fn add_or_switch(&mut self, buffer: Buffer) {
-        if let Some(path) = buffer.path() {
-            let found = self
-                .editors
-                .iter()
-                .position(|e| e.buffer().path().is_some_and(|p| same_file(p, path)));
-            if let Some(i) = found {
-                self.current = i;
-                return;
-            }
-        }
+    /// Index of the open buffer holding the same file as `path`.
+    fn position_of(&self, path: &Path) -> Option<usize> {
+        self.editors.iter().position(|e| e.buffer().path().is_some_and(|p| same_file(p, path)))
+    }
+
+    /// Makes `buffer` current: replaces a lone pristine unnamed buffer, or appends.
+    fn add_buffer(&mut self, buffer: Buffer) {
         let only = &self.editors[0];
         let pristine = self.editors.len() == 1
             && only.buffer().path().is_none()
@@ -335,13 +335,12 @@ impl App {
         }
     }
 
-    /// Reads `rel` from disk.
-    fn load(&self, rel: &str) -> Result<Buffer, String> {
+    /// Reads `path` from disk.
+    fn load(&self, path: &Path) -> Result<Buffer, String> {
         // `Buffer::open` treats a missing file as new, and a later save
         // would recreate it. `metadata` follows symlinks, so a dangling
         // link or an unreadable parent is refused too.
-        let path = self.location.join(rel);
-        let Ok(meta) = std::fs::metadata(&path) else {
+        let Ok(meta) = std::fs::metadata(path) else {
             return Err("File no longer exists".to_string());
         };
         // Reading a FIFO or a device can block forever (or never end).
@@ -351,7 +350,7 @@ impl App {
         if meta.len() > MAX_OPEN_BYTES {
             return Err("File too large".to_string());
         }
-        Buffer::open(&path).map_err(|e| format!("Open failed: {e}"))
+        Buffer::open(path).map_err(|e| format!("Open failed: {e}"))
     }
 }
 

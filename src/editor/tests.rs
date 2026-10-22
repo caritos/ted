@@ -195,28 +195,6 @@ fn view_survives_tiny_terminals() {
     }
 }
 
-#[test]
-fn editor_load_replaces_buffer_and_resets_scroll() {
-    let text: Vec<String> = (0..10).map(|i| format!("line{i}")).collect();
-    let mut e = Editor::new(Buffer::from_text(&text.join("\n")));
-    for _ in 0..9 {
-        e.handle_key(key(KeyCode::Down));
-    }
-    for _ in 0..4 {
-        e.handle_key(key(KeyCode::Right));
-    }
-    e.view(3, 5); // scrolled down and right
-    e.handle_key(key(KeyCode::Char('x')));
-
-    e.load(Buffer::from_text("new\ntext"));
-    assert_eq!(e.buffer().text(), "new\ntext");
-    assert!(!e.buffer().is_modified());
-    assert_eq!(e.message(), "");
-    let v = e.view(3, 5);
-    assert_eq!(v.lines, vec!["new", "tex", "~"]);
-    assert_eq!(v.cursor, (0, 0));
-}
-
 fn named_editor(name: &str, text: &str) -> Editor {
     let dir = temp_file(name).parent().unwrap().to_path_buf();
     let path = dir.join(name);
@@ -459,7 +437,7 @@ fn non_highlighted_buffers_walk_and_cache_nothing() {
 }
 
 #[test]
-fn load_clears_the_highlight_cache() {
+fn new_editor_on_a_different_buffer_has_no_stale_highlight_cache() {
     let mut text = String::from("/*\n");
     text.push_str(&"let x = 1;\n".repeat(50));
     let mut e = named_editor("a.rs", &text);
@@ -469,18 +447,15 @@ fn load_clears_the_highlight_cache() {
     assert!(!e.line_states.is_empty());
 
     // Same language and shape, but no comment.
-    let dir = temp_file("load").parent().unwrap().to_path_buf();
-    let path = dir.join("b.rs");
-    fs::write(&path, "let x = 1;\n".repeat(51)).unwrap();
-    e.load(Buffer::open(&path).unwrap());
+    let mut e = named_editor("b.rs", &"let x = 1;\n".repeat(51));
     assert!(e.line_states.is_empty());
     press(&mut e, KeyCode::Down, 50);
     let v = e.view(30, 10);
     assert_eq!(v.styles, reference_styles(&e, &v, 30));
     assert_eq!(v.styles[0][0], Style::Keyword);
 
-    // Switching to a non-highlighted buffer leaves the cache empty.
-    e.load(Buffer::from_text(&text));
+    // A non-highlighted buffer leaves the cache empty.
+    let mut e = Editor::new(Buffer::from_text(&text));
     e.view(30, 10);
     assert!(e.line_states.is_empty());
 }

@@ -908,18 +908,66 @@ fn opening_same_file_via_dot_path_does_not_duplicate() {
 #[test]
 fn ctrl_n_and_ctrl_p_wrap() {
     let dir = Temp::new("multi-wrap");
-    let mut app = multi_app(&dir);
-    app.handle_key(key(KeyCode::Down), t(1000)); // a.txt cursor row 1
+    dir.file("a.txt", "a0\na1\na2\na3\n");
+    dir.file("b.txt", "b0\nb1\nb2\nb3\n");
+    dir.file("c.txt", "c0\nc1\nc2\nc3\n");
+    let buffer = Buffer::open(&dir.0.join("a.txt")).unwrap();
+    let mut app = app_with(Editor::new(buffer), dir.0.clone(), one_file());
+    let down = |app: &mut App, n: usize| {
+        for _ in 0..n {
+            app.handle_key(key(KeyCode::Down), t(1000));
+        }
+    };
+    down(&mut app, 1); // a.txt cursor row 1
     open_from_tree(&mut app, 1);
+    down(&mut app, 2); // b.txt cursor row 2
     open_from_tree(&mut app, 2);
+    down(&mut app, 3); // c.txt cursor row 3
     assert_eq!(app.buffer_count(), 3);
     assert_eq!(app.current_index(), 2);
     app.handle_key(ctrl('n'), t(1000));
     assert_eq!(app.current_index(), 0);
     assert_eq!(app.editor().buffer().cursor().0, 1);
+    app.handle_key(ctrl('n'), t(1000));
+    assert_eq!(app.editor().buffer().cursor().0, 2);
+    app.handle_key(ctrl('n'), t(1000));
+    assert_eq!(app.editor().buffer().cursor().0, 3);
+    app.handle_key(ctrl('p'), t(1000));
+    assert_eq!(app.current_index(), 1);
+    assert_eq!(app.editor().buffer().cursor().0, 2);
+    app.handle_key(ctrl('p'), t(1000));
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(app.editor().buffer().cursor().0, 1);
     app.handle_key(ctrl('p'), t(1000));
     assert_eq!(app.current_index(), 2);
-    assert_eq!(app.editor().buffer().cursor().0, 0);
+    assert_eq!(app.editor().buffer().cursor().0, 3);
+}
+
+#[test]
+fn opening_open_file_does_not_reread_it() {
+    let dir = Temp::new("multi-noreread");
+    let mut app = multi_app(&dir);
+    // The open copy is no longer valid UTF-8 on disk; switching must not read it.
+    fs::write(dir.0.join("a.txt"), [0xff, 0xfe, 0x00]).unwrap();
+    open_from_tree(&mut app, 1);
+    open_from_tree(&mut app, 0);
+    assert!(!app.in_file_tree());
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(app.editor().buffer().text(), "alpha\nsecond\n");
+    assert_eq!(app.screen(80, 6, t(1000)).message, "");
+}
+
+#[test]
+fn opening_symlink_to_open_file_switches() {
+    let dir = Temp::new("multi-symlink");
+    let mut app = multi_app(&dir);
+    std::os::unix::fs::symlink(dir.0.join("a.txt"), dir.0.join("d.txt")).unwrap();
+    open_from_tree(&mut app, 1);
+    assert_eq!(app.buffer_count(), 2);
+    open_from_tree(&mut app, 3); // d.txt -> a.txt
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
 }
 
 #[test]

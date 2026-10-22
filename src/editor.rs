@@ -75,17 +75,6 @@ impl Editor {
         &self.message
     }
 
-    /// Replaces the buffer and starts it fresh: top-left scroll, no message,
-    /// no highlight cache.
-    pub fn load(&mut self, buffer: Buffer) {
-        self.buffer = buffer;
-        self.line_states = Vec::new();
-        self.highlighted = None;
-        self.message.clear();
-        self.scroll_row = 0;
-        self.scroll_col = 0;
-    }
-
     pub fn handle_key(&mut self, key: KeyEvent) -> Flow {
         self.message.clear();
 

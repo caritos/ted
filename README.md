@@ -73,11 +73,29 @@ Files ending in `.rs` are drawn with colors from the terminal's ANSI palette, so
 | Ctrl-W | Close the current buffer. A modified one warns first; press Ctrl-W again to close it without saving, any other key cancels. Closing the last buffer leaves one empty unnamed buffer. Ignored in the git view, tree and list |
 | F1 | Open the help screen (also `?` in the git view, file tree and buffer list) |
 | Ctrl-S | Save the current buffer only |
+| Ctrl-F | Find text (opens a prompt in the message row; see [Search](#search)) |
+| F3 | Jump to the next match of the last search |
+| Ctrl-L | Go to a line number (prompt) |
 | Ctrl-Q | Quit. If any buffer has unsaved changes it warns ("Unsaved changes in N buffers!"); press Ctrl-Q again to quit without saving. Any other key cancels the warning |
+
+## Search
+
+Ctrl-F opens a `Find:` prompt in the message row. The cursor jumps to the first match at or after where it was, as you type. The search is plain text on a single line, case-insensitive unless the query contains an uppercase letter (smart case), and wraps around the end of the buffer (the prompt then shows `(wrapped)`); with no match it shows `(not found)` and the cursor stays where it was. Ctrl-L opens `Go to line:`; the cursor moves to that line (counted from 1) as you type.
+
+| Key (prompt) | Action |
+|---|---|
+| Enter | Accept: stay at the match (an empty Find prompt reuses the last search) |
+| Esc | Cancel: the cursor and scroll go back to where they were |
+| Down / Ctrl-F | Next match |
+| Up | Previous match |
+| F3 (in the editor) | Next match of the last search, without a prompt |
+| Ctrl-Q | Cancel the prompt, then quit as usual |
+
+While a prompt is open it gets every key: Ctrl-G, Ctrl-T, Ctrl-O, Ctrl-N, Ctrl-P, Ctrl-W, F1 and `?` do not open views or help (a `?` is part of the query). Ctrl-F, Ctrl-L and F3 do nothing in the git view, file tree, buffer list and help. Not done yet: highlighting all matches, replace, regular expressions, queries that span lines, searching in the other views. A full not-found scan of a 100,000-line file costs about 70 ms per keystroke.
 
 ## Help
 
-Press F1 to see every key. The editor shows `F1: help` in its message row until your first key press. F1 works from the editor, the git view, the file tree and the buffer list, and `?` also opens it from those three views (in the editor `?` is just text). The help screen lists the keys in sections (Editor, Quit, Help, Files and buffers, Views); lines longer than the window are cut, not wrapped. Other keys (Ctrl-S, typing and so on) are ignored while help is showing. Opened from the commit picker (`b` in the git view), closing help returns to the picker.
+Press F1 to see every key. The editor shows `F1: help` in its message row until your first key press. F1 works from the editor, the git view, the file tree and the buffer list, and `?` also opens it from those three views (in the editor `?` is just text). The help screen lists the keys in sections (Editor, Quit, Find / go to line prompt, Help, Files and buffers, Views); lines longer than the window are cut, not wrapped. Other keys (Ctrl-S, typing and so on) are ignored while help is showing. Opened from the commit picker (`b` in the git view), closing help returns to the picker.
 
 | Key (help) | Action |
 |---|---|
@@ -144,12 +162,12 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 320 unit tests
+cargo test                                   # 371 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
 
-The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dim sequences, and that a `.txt` file with identical text has no color or dim sequences. The last one opens a `.txt` file containing `ESC[31mRED ESC[2J END` and checks that neither sequence reaches the terminal (apart from ted's own clear on entering the alternate screen) and that `?[31mRED` and `END` are drawn. A final scenario opens `a.txt` and `b.txt` through the tree, checks `[2/2]`, edits the first, checks the Ctrl-O list (names, `[+]`, `>` marker), Enter back, the Ctrl-W warning, the Ctrl-Q warning with `1 buffer`, and a second Ctrl-Q exiting 0. A scenario for PageDown/PageUp checks the cursor jumps a screenful. The last scenario checks the `F1: help` hint, F1 showing the Help screen with `Ctrl-S` and `Ctrl-Q`, `q` returning to the editor text and exit 0. That is 70 checks in total (27 before the tree, 12 for the tree, 8 for highlighting, 5 for escape sequences, 10 for buffers, 3 for paging, 5 for help).
+The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory, and checks that a slow `git` never blocks keys. A final scenario opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. A last scenario opens a `.rs` file and checks that the keyword, string and comment are preceded by the magenta, green and dim sequences, and that a `.txt` file with identical text has no color or dim sequences. The last one opens a `.txt` file containing `ESC[31mRED ESC[2J END` and checks that neither sequence reaches the terminal (apart from ted's own clear on entering the alternate screen) and that `?[31mRED` and `END` are drawn. A final scenario opens `a.txt` and `b.txt` through the tree, checks `[2/2]`, edits the first, checks the Ctrl-O list (names, `[+]`, `>` marker), Enter back, the Ctrl-W warning, the Ctrl-Q warning with `1 buffer`, and a second Ctrl-Q exiting 0. A scenario for PageDown/PageUp checks the cursor jumps a screenful. The last scenario checks the `F1: help` hint, F1 showing the Help screen with `Ctrl-S` and `Ctrl-Q`, `q` returning to the editor text and exit 0. A search scenario opens a 200-line file and checks Ctrl-F "line 150" + Enter shows `line 150`, Ctrl-L "10" + Enter scrolls back to line 10 (status `10:1`), "zzz" shows `not found`, Esc closes the prompt, F3 jumps to the next match and the session exits 0. That is 79 checks in total (27 before the tree, 12 for the tree, 8 for highlighting, 5 for escape sequences, 10 for buffers, 3 for paging, 5 for help, 9 for search).
 
 The buffer commands not in that scenario (Ctrl-N / Ctrl-P wrapping, closing, opening an already-open file, Ctrl-O from the git view or tree, list scrolling, tiny windows) are covered by unit tests only. The file tree's Ctrl-G / Ctrl-T cross-switching, its once-a-second refresh, the `(cannot read)` row and rooting for `ted <file>` are covered by unit tests only, not by the pty run.
 
@@ -157,7 +175,7 @@ Verified by hand in a real terminal: save, quit, add text, delete text. Unit tes
 
 ## Not yet
 
-undo, search, tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+undo, search extras (match highlight, replace, regex, multi-line queries, search in other views), tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

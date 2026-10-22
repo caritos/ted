@@ -12,6 +12,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - `src/bufferlist.rs` - buffer list state (selection, `ListAction`) and rendering to `Screen`. No terminal code.
 - `src/help.rs` - help screen: static key table (`HELP`), scroll state (clamped at render), `HelpAction`, render to `Screen`. No terminal code. `App` has `Mode::Help` and `help_from`; F1 opens it everywhere, `?` from the three views.
 - `src/app.rs` - owns the open buffers (`editors` + `current`, one `Editor` each), the optional git view, file tree and buffer list (`Mode` enum); Ctrl-G / Ctrl-T / Ctrl-O / `q` switch modes, Ctrl-N/P cycle buffers, Ctrl-W closes (`close_armed`), Ctrl-Q quits (`quit_armed`, counts every modified buffer). Opening a file adds or switches to a buffer.
+- Search / go to line: `Buffer::find`, `go_to_line`, `set_cursor` in `buffer.rs`; the Find / Go to prompt lives in `editor.rs` (`in_prompt`, `cancel_prompt`); `app.rs` routes every key to an open prompt first (only Ctrl-Q escapes it).
 - `src/screen.rs` - plain `Screen` value (rows of styled spans) that both modes render to; `Style` includes the syntax styles.
 - `src/highlight.rs` - Rust tokenizer (std only, char-based), chosen by file extension; `Editor::view` fills per-char styles from it, caching the `LineState` at the start of each line (cut back at the buffer's dirty row, per `Editor`, reset on a language change).
 - `src/main.rs` - thin crossterm layer only: raw mode, read keys, draw the `View`. Keep logic out of it.
@@ -29,6 +30,12 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-22 (search and go to line)
+- Done (unit-tested, 371 tests in total): `Buffer::find` / `set_cursor` / `go_to_line`; `Editor` one-line prompt in the message row (Ctrl-F find: incremental, smart case, wraps, Down/Ctrl-F next, Up previous, Enter accepts, Esc restores cursor and scroll; Ctrl-L go to line; F3 next match); `App` sends every key except Ctrl-Q to an open prompt (Ctrl-Q cancels it, then the normal quit rules; any other key withdraws a pending quit/close warning); Ctrl-F / Ctrl-L / F3 do nothing in the git view, tree, buffer list and help; help table lists them (Ctrl-S and Ctrl-Q still on the first 80x24 screen). App tests in `src/app/tests/search.rs`.
+- Done (pty smoke, 79 checks, 9 new): 200-line file; Ctrl-F "line 150" + Enter shows `line 150`, Ctrl-L "10" + Enter scrolls back (status `10:1`), "zzz" shows `not found`, Esc closes, F3 jumps to the next match, exit 0. Seen failing (6 of 9) against the previously installed `~/.cargo/bin/ted`; the Esc and F3 checks pass there vacuously. Note: after go-to-line 10 line 10 is the top row, so the check looks for `line 10`, not `line 9`.
+- Measured earlier: a full not-found scan of 100k lines costs about 70 ms per keystroke (the prompt searches again on every key).
+- Not yet verified by hand: how the prompt looks and feels in a real terminal, F3 over ssh/tmux, scrolling after a jump on a very large file.
+- Deferred: match highlight, replace, regex, multi-line queries, search in the git view / tree / help, faster search for huge files.
 ### 2026-10-22 (help screen)
 - Done (unit-tested, 320 tests in total, 22 new: 10 in `help.rs`, 9 in `src/app/tests/help.rs`): F1 opens a scrollable help from the editor, git view, file tree and buffer list; `?` also from the three views (types `?` in the editor); `q`/Esc/F1/`?` return to the origin mode; Ctrl-Q follows the app quit rules, Ctrl-N/P/O/G/T leave help, Ctrl-W ignored; table checked against a hard-coded key list; 0..=6 x 0..=6 sweeps; initial `F1: help` message cleared by the first key.
 - Done (pty smoke, 70 checks, 5 new): hint shown, F1 shows the Help screen with `Ctrl-S` and `Ctrl-Q`, `q` returns to the editor text, exit 0. Seen failing (4 of 5) against the previously installed `~/.cargo/bin/ted`, which lacks F1. Found by the pty run: Ctrl-Q was below the fold on 24 rows, so the Quit section now sits right after Editor (unit test pins it).

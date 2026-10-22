@@ -474,6 +474,70 @@ finally:
             pass
     shutil.rmtree(hp, ignore_errors=True)
 
+# 16. find and go to line: Ctrl-F, Ctrl-L, F3 (ESC O R), prompt in the message row.
+CTRL_F, CTRL_L, F3, ESC = b"\x06", b"\x0c", b"\x1bOR", b"\x1b"
+sp = tempfile.mkdtemp(prefix="ted-smoke-search-")
+pid = fd = None
+try:
+    p = os.path.join(sp, "s.txt")
+    with open(p, "w") as f:
+        f.write("".join(f"line {n}\n" for n in range(1, 201)))
+    pid, fd = spawn([p])
+    out = drain(fd)
+    check("search: line 150 is not on the first screen", b"line 150" not in out, out[-200:])
+    send(fd, CTRL_F)
+    out = drain(fd)
+    check("search: Ctrl-F opens the Find prompt", b"Find:" in out, out[-200:])
+    send(fd, b"line 150")
+    drain(fd)
+    send(fd, b"\r")
+    out = drain(fd)
+    check("search: Enter shows line 150", b"line 150" in out and b"Find:" not in out and b"[+]" not in out, out[-300:])
+    send(fd, CTRL_L)
+    out = drain(fd)
+    check("search: Ctrl-L opens the Go to line prompt", b"Go to line:" in out, out[-200:])
+    send(fd, b"10")
+    drain(fd)
+    send(fd, b"\r")
+    out = drain(fd)
+    check("search: go to 10 scrolls back to line 10 (status 10:1)", b"line 10" in out and b" 10:1" in out and b"line 150" not in out and b"[+]" not in out, out[-300:])
+    send(fd, CTRL_F)
+    drain(fd)
+    send(fd, b"zzz")
+    out = drain(fd)
+    check("search: no match says not found", b"not found" in out, out[-200:])
+    send(fd, ESC)
+    out = drain(fd, 0.6, 2.0)
+    check("search: Esc closes the prompt", b"Find:" not in out and b"not found" not in out, out[-200:])
+    send(fd, CTRL_F)
+    drain(fd)
+    send(fd, b"line 15")
+    drain(fd)
+    send(fd, b"\r")
+    drain(fd)
+    send(fd, F3)
+    out = drain(fd)
+    check("search: F3 finds the next match", b"line 15" in out or b"Find:" not in out, out[-200:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("search: session exits 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(sp, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

@@ -29,7 +29,7 @@ fn main() -> ExitCode {
         [path] => match Buffer::open(Path::new(path)) {
             Ok(buffer) => (buffer, parent_of(Path::new(path))),
             Err(e) => {
-                eprintln!("ted: {path}: {e}");
+                eprintln!("{}", ted::text::sanitize(&format!("ted: {path}: {e}")));
                 return ExitCode::FAILURE;
             }
         },
@@ -44,7 +44,7 @@ fn main() -> ExitCode {
     match run(app) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("ted: {e}");
+            eprintln!("{}", ted::text::sanitize(&format!("ted: {e}")));
             ExitCode::FAILURE
         }
     }

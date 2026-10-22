@@ -104,7 +104,7 @@ src/editor.rs    Key handling, scrolling, status and messages.
                  Editor::view(width, height) returns a plain View value to draw.
 src/git.rs       Read-only `git` CLI wrapper behind a trait (status, diff, log).
 src/gitview.rs   Git view state: file list, selection, diff scroll, commit picker.
-src/text.rs      Shared text helpers (width fitting, truncation).
+src/text.rs      Shared text helpers (width fitting, truncation, `sanitize`).
 src/filetree.rs  Read-only file tree state: expansion, selection, rendering.
 src/bufferlist.rs Buffer list state (selection, keys) and rendering.
 src/app.rs       Owns the buffers (one Editor each), git view, file tree and buffer
@@ -127,7 +127,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 296 unit tests
+cargo test                                   # 298 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```

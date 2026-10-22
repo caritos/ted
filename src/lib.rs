@@ -7,4 +7,4 @@ pub mod git;
 pub mod gitview;
 pub mod highlight;
 pub mod screen;
-pub(crate) mod text;
+pub mod text;

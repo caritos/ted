@@ -70,3 +70,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Done (unit-tested, 296 tests in total): issue #2 fixed: after Enter, Backspace or Delete the cursor is re-placed from its char index (`Buffer::place_cursor`), so a `\n` that joins a lone `\r` into one break no longer leaves it past the last row. Editor Home/End and PageUp/PageDown (one screenful less one, from the last frame; 20 before the first frame; goal column kept).
 - Done (pty smoke, 3 new checks): two PageDowns on a 200-line file show `line 40`, PageUp goes back; seen failing on the previous installed binary.
 - Not yet verified by hand: PageUp/PageDown and Home/End feel in a real terminal. The randomized mixed-break test I tried passed on the old code too, so it was dropped; only the deterministic regression tests remain.
+
+### 2026-10-22 (issue #3 follow-ups, part 1)
+- Done: bidi and zero-width characters (U+200B-200F, U+202A-202E, U+2066-2069, U+FEFF) are drawn as `?` everywhere text is sanitized (unit-tested, 298 tests in total). The startup error line on stderr is sanitized too; confirmed by hand with a file name containing ESC (`bad?[2Jname`, no ESC byte on stderr). `text` is now a public module so `main.rs` can use `sanitize`.
+- Still open in #3: tab-stop expansion, `None` cursor at tiny sizes, App tiny-size test strength, pty `ESC[2J` assumption.

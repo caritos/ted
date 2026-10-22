@@ -3,12 +3,15 @@ use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::git::{Baseline, Change, ChangeKind, Commit, Git};
+use crate::git::{format_age, Baseline, Change, ChangeKind, Commit, Git};
+use crate::screen::{Row, Screen, Span, Style};
 
 /// Commits listed in the baseline picker.
 const PICKER_LIMIT: usize = 50;
 /// Diff lines scrolled by PageUp/PageDown.
 const DIFF_PAGE: usize = 20;
+/// Narrowest the file list gets when there is room.
+const MIN_LIST_WIDTH: usize = 12;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum GitAction {
@@ -249,6 +252,101 @@ impl GitView {
         }
     }
 
+    /// Draws the view into `height` rows in total, status and message rows
+    /// included, each at most `width` characters wide.
+    pub fn render(&self, width: usize, height: usize, now: SystemTime) -> Screen {
+        // Status and message take the last two rows; with less room than
+        // that nothing is drawn but blank rows.
+        let body_h = height.saturating_sub(2);
+        let mut rows: Vec<Row> = if self.picker.is_some() {
+            self.picker_rows(width, body_h)
+        } else if let Some(err) = &self.error {
+            vec![styled(err, width, Style::Normal)]
+        } else {
+            self.split_rows(width, body_h, now)
+        };
+        rows.truncate(body_h);
+        rows.resize_with(body_h, Vec::new);
+
+        let (status, message) = if height >= 2 {
+            (clip(&self.status_text(), width), clip(&self.message, width))
+        } else {
+            (String::new(), String::new())
+        };
+        Screen { rows, status, message, cursor: None }
+    }
+
+    fn status_text(&self) -> String {
+        let base = match &self.baseline {
+            None | Some(Baseline::Empty) => "Baseline: (no commits)".to_string(),
+            Some(Baseline::Commit(hash)) => format!("Baseline {}", clip(hash, 7)),
+        };
+        let n = self.entries.len();
+        format!("{base}  {n} change{}", if n == 1 { "" } else { "s" })
+    }
+
+    fn picker_rows(&self, width: usize, body_h: usize) -> Vec<Row> {
+        let Some(picker) = &self.picker else { return Vec::new() };
+        let first = window_start(picker.selected, body_h);
+        picker
+            .commits
+            .iter()
+            .enumerate()
+            .skip(first)
+            .map(|(i, c)| {
+                let text = format!(
+                    "{}  {}  {}  [{}]",
+                    c.short,
+                    c.subject,
+                    format_commit_time(c.unix_time),
+                    c.refs.join(", ")
+                );
+                let style = if i == picker.selected { Style::Selected } else { Style::Normal };
+                styled(&text, width, style)
+            })
+            .collect()
+    }
+
+    fn split_rows(&self, width: usize, body_h: usize, now: SystemTime) -> Vec<Row> {
+        let list_w = (width / 3).max(MIN_LIST_WIDTH).min(width);
+        let right_w = width.saturating_sub(list_w + 1);
+
+        let selected = self.selected.as_deref().and_then(|s| self.index_of(s)).unwrap_or(0);
+        let first = window_start(selected, body_h);
+        let mut left: Vec<(String, Style)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .skip(first)
+            .map(|(i, e)| {
+                let age = format_age(now.duration_since(e.time).map_or(0, |d| d.as_secs()));
+                let tail = format!("  {age}");
+                let room = list_w.saturating_sub(2 + tail.chars().count());
+                let text = format!("{} {}{tail}", e.change.kind.letter(), clip(&e.change.path, room));
+                (text, if i == selected { Style::Selected } else { Style::Normal })
+            })
+            .collect();
+        if self.entries.is_empty() {
+            left.push(("No changes since baseline".to_string(), Style::Dim));
+        }
+        let mut diff = self.diff.lines().skip(self.diff_scroll);
+
+        (0..body_h)
+            .map(|i| {
+                let (text, style) = left.get(i).cloned().unwrap_or((String::new(), Style::Normal));
+                let mut row: Row = vec![Span { text: pad(&text, list_w), style }];
+                if width > list_w {
+                    row.push(Span { text: "|".to_string(), style: Style::Dim });
+                    if let Some(line) = diff.next() {
+                        let text = clip(&line.replace('\t', "    "), right_w);
+                        row.push(Span { text, style: diff_style(line) });
+                    }
+                }
+                row
+            })
+            .collect()
+    }
+
     fn selected_change(&self) -> Option<&Change> {
         let i = self.index_of(self.selected.as_deref()?)?;
         Some(&self.entries[i].change)
@@ -293,6 +391,59 @@ impl GitView {
     pub(crate) fn picker_selected(&self) -> Option<usize> {
         self.picker.as_ref().filter(|p| !p.commits.is_empty()).map(|p| p.selected)
     }
+}
+
+/// First row to show so that `selected` is inside a window of `height` rows.
+fn window_start(selected: usize, height: usize) -> usize {
+    (selected + 1).saturating_sub(height.max(1))
+}
+
+fn diff_style(line: &str) -> Style {
+    if ["diff", "index", "---", "+++"].iter().any(|p| line.starts_with(p)) {
+        Style::Dim
+    } else if line.starts_with("@@") {
+        Style::Hunk
+    } else if line.starts_with('+') {
+        Style::Added
+    } else if line.starts_with('-') {
+        Style::Removed
+    } else {
+        Style::Normal
+    }
+}
+
+/// At most `n` characters of `s`.
+fn clip(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// `s` clipped or space-padded to exactly `n` characters.
+fn pad(s: &str, n: usize) -> String {
+    let mut out = clip(s, n);
+    let len = out.chars().count();
+    out.extend(std::iter::repeat_n(' ', n - len));
+    out
+}
+
+fn styled(s: &str, width: usize, style: Style) -> Row {
+    vec![Span { text: clip(s, width), style }]
+}
+
+/// "YYYY-MM-DD HH:MM" in UTC for a Unix timestamp.
+pub fn format_commit_time(unix: i64) -> String {
+    let days = unix.div_euclid(86_400);
+    let secs = unix.rem_euclid(86_400);
+    // Civil-from-days (Howard Hinnant), days since 1970-01-01.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}", secs / 3600, secs % 3600 / 60)
 }
 
 #[cfg(test)]

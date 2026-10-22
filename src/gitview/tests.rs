@@ -1,7 +1,6 @@
 use super::*;
 use crate::git::fake::FakeGit;
-use crate::git::{ChangeKind, Commit, GitError};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::git::{ChangeKind, Commit, GitError};use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::{Duration, UNIX_EPOCH};
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -429,4 +428,207 @@ fn deleted_file_keeps_first_noticed_time_when_it_leaves_and_reenters_list() {
     view.refresh(&git, t(3000));
     assert_eq!(paths(&view), vec!["mid.rs", "gone.rs"]);
     assert_eq!(view.entry_time("gone.rs"), Some(t(1000)));
+}
+
+// ---- render ----
+
+fn row_text(row: &Row) -> String {
+    row.iter().map(|s| s.text.as_str()).collect()
+}
+
+fn render_git(git: &FakeGit, w: usize, h: usize) -> Screen {
+    refreshed(git).render(w, h, t(1000))
+}
+
+fn two_files() -> FakeGit {
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, "a.rs", Some(t(940)));
+    git.add(ChangeKind::Untracked, "b.rs", Some(t(100)));
+    git.diffs.insert(
+        "a.rs".to_string(),
+        "diff --git a/a.rs b/a.rs\nindex 1..2 100644\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n ctx\n".to_string(),
+    );
+    git
+}
+
+#[test]
+fn render_shows_status_letter_path_and_age() {
+    let screen = render_git(&two_files(), 60, 10);
+    assert_eq!(screen.rows.len(), 8);
+    assert!(row_text(&screen.rows[0]).starts_with("M a.rs  1m"));
+    assert!(row_text(&screen.rows[1]).starts_with("? b.rs  15m"));
+    assert_eq!(screen.status, "Baseline h1  2 changes");
+    assert_eq!(screen.cursor, None);
+}
+
+#[test]
+fn render_negative_age_clamps_to_zero() {
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, "a.rs", Some(t(5000)));
+    let screen = render_git(&git, 40, 4);
+    assert!(row_text(&screen.rows[0]).starts_with("M a.rs  0s"));
+}
+
+#[test]
+fn render_styles_diff_lines() {
+    let screen = render_git(&two_files(), 80, 12);
+    let style_of = |i: usize| screen.rows[i].last().unwrap().style;
+    assert_eq!(style_of(0), Style::Dim);
+    assert_eq!(style_of(1), Style::Dim);
+    assert_eq!(style_of(2), Style::Dim);
+    assert_eq!(style_of(3), Style::Dim);
+    assert_eq!(style_of(4), Style::Hunk);
+    assert_eq!(style_of(5), Style::Removed);
+    assert_eq!(style_of(6), Style::Added);
+    assert_eq!(style_of(7), Style::Normal);
+    assert!(row_text(&screen.rows[5]).ends_with("-old"));
+}
+
+#[test]
+fn render_diff_respects_scroll() {
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, "a.rs", Some(t(1)));
+    git.diffs.insert("a.rs".to_string(), diff_of(100));
+    let mut view = refreshed(&git);
+    view.handle_key(key(KeyCode::PageDown), &git, t(1000));
+    let screen = view.render(40, 6, t(1000));
+    assert!(row_text(&screen.rows[0]).ends_with("+line 20"));
+}
+
+#[test]
+fn render_selected_row_is_styled_selected() {
+    let screen = render_git(&two_files(), 60, 10);
+    assert_eq!(screen.rows[0][0].style, Style::Selected);
+    assert_eq!(screen.rows[1][0].style, Style::Normal);
+}
+
+#[test]
+fn render_keeps_selected_row_visible_in_short_list() {
+    let mut git = FakeGit::new();
+    for i in 0..10 {
+        git.add(ChangeKind::Modified, &format!("f{i}.rs"), Some(t(900 - i)));
+    }
+    let mut view = refreshed(&git);
+    for _ in 0..9 {
+        view.handle_key(key(KeyCode::Down), &git, t(1000));
+    }
+    let screen = view.render(40, 5, t(1000));
+    let selected: Vec<_> = screen.rows.iter().filter(|r| r[0].style == Style::Selected).collect();
+    assert_eq!(selected.len(), 1);
+    assert!(row_text(selected[0]).contains("f9.rs"));
+}
+
+#[test]
+fn render_empty_state_text() {
+    let screen = render_git(&FakeGit::new(), 60, 6);
+    assert!(row_text(&screen.rows[0]).contains("No changes since"));
+    assert_eq!(screen.status, "Baseline h1  0 changes");
+}
+
+#[test]
+fn render_empty_repo_baseline_text() {
+    let mut git = FakeGit::new();
+    git.head = Baseline::Empty;
+    assert_eq!(render_git(&git, 60, 6).status, "Baseline: (no commits)  0 changes");
+}
+
+#[test]
+fn render_error_state_text() {
+    let mut git = FakeGit::new();
+    git.fail = Some(GitError::NotARepo);
+    let screen = render_git(&git, 60, 6);
+    assert_eq!(row_text(&screen.rows[0]), "not a git repository");
+    assert!(screen.rows[1..].iter().all(|r| row_text(r).is_empty()));
+}
+
+#[test]
+fn render_shows_message_row() {
+    let mut git = two_files();
+    git.add(ChangeKind::Deleted, "gone.rs", None);
+    let mut view = refreshed(&git);
+    // The deleted file has no mtime, so it sorts first by first-seen time.
+    assert_eq!(view.selected_path(), Some("gone.rs"));
+    view.handle_key(key(KeyCode::Enter), &git, t(1000));
+    assert_eq!(view.render(60, 6, t(1000)).message, "gone.rs was deleted; nothing to open");
+}
+
+#[test]
+fn render_picker_rows_contain_short_hash_subject_time_and_refs() {
+    let mut git = FakeGit::new();
+    let mut c1 = commit("abcdef1234", "first");
+    c1.refs = vec!["main".to_string(), "v1".to_string()];
+    git.log = vec![c1, commit("1234567890", "second")];
+    let mut view = refreshed(&git);
+    view.handle_key(ch('b'), &git, t(1000));
+    let screen = view.render(80, 8, t(1000));
+    assert_eq!(row_text(&screen.rows[0]), "abcdef1  first  2023-11-14 22:13  [main, v1]");
+    assert_eq!(screen.rows[0][0].style, Style::Selected);
+    assert!(row_text(&screen.rows[1]).starts_with("1234567  second"));
+    assert_eq!(screen.rows[1][0].style, Style::Normal);
+}
+
+#[test]
+fn render_picker_keeps_selection_visible() {
+    let mut git = FakeGit::new();
+    git.log = (0..10).map(|i| commit(&format!("{i}000000"), &format!("c{i}"))).collect();
+    let mut view = refreshed(&git);
+    view.handle_key(ch('b'), &git, t(1000));
+    for _ in 0..9 {
+        view.handle_key(key(KeyCode::Down), &git, t(1000));
+    }
+    let screen = view.render(60, 5, t(1000));
+    assert_eq!(screen.rows.len(), 3);
+    assert!(row_text(screen.rows.last().unwrap()).contains("c9"));
+    assert_eq!(screen.rows.last().unwrap()[0].style, Style::Selected);
+}
+
+#[test]
+fn format_commit_time_known_values() {
+    assert_eq!(format_commit_time(1_700_000_000), "2023-11-14 22:13");
+    assert_eq!(format_commit_time(0), "1970-01-01 00:00");
+    assert_eq!(format_commit_time(951_782_400), "2000-02-29 00:00");
+    assert_eq!(format_commit_time(-1), "1969-12-31 23:59");
+    assert_eq!(format_commit_time(4_102_444_799), "2099-12-31 23:59");
+}
+
+fn assert_fits(screen: &Screen, w: usize, h: usize) {
+    let total = screen.rows.len() + usize::from(h >= 2) * 2;
+    assert!(total <= h, "{w}x{h}: {total} rows");
+    for row in &screen.rows {
+        assert!(row_text(row).chars().count() <= w, "{w}x{h}: row too wide");
+    }
+    assert!(screen.status.chars().count() <= w);
+    assert!(screen.message.chars().count() <= w);
+}
+
+#[test]
+fn render_never_exceeds_width_or_height() {
+    let mut list = two_files();
+    list.add(ChangeKind::Modified, "dir/\u{e9}\u{e9}\u{e9}/very_long_name_indeed.rs", Some(t(10)));
+    let mut err = FakeGit::new();
+    err.fail = Some(GitError::Failed("something went quite wrong here".to_string()));
+    let mut pick = FakeGit::new();
+    pick.log = vec![commit("abcdef1234", "a rather long subject line")];
+    for w in 0..=40 {
+        for h in 0..=8 {
+            assert_fits(&render_git(&list, w, h), w, h);
+            assert_fits(&render_git(&err, w, h), w, h);
+            let mut view = refreshed(&pick);
+            view.handle_key(ch('b'), &pick, t(1000));
+            assert_fits(&view.render(w, h, t(1000)), w, h);
+        }
+    }
+}
+
+#[test]
+fn render_with_unicode_paths_clips_by_char_not_byte() {
+    let name = "\u{65e5}\u{672c}\u{8a9e}\u{30d5}\u{30a1}\u{30a4}\u{30eb}\u{540d}\u{524d}.rs";
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, name, Some(t(1)));
+    git.diffs.insert(name.to_string(), "+\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\n".to_string());
+    for w in 0..=30 {
+        assert_fits(&render_git(&git, w, 6), w, 6);
+    }
+    let screen = render_git(&git, 24, 6);
+    assert!(row_text(&screen.rows[0]).starts_with("M \u{65e5}\u{672c}"));
 }

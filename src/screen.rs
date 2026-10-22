@@ -15,6 +15,7 @@ pub enum Style {
     Comment,
     Number,
     Meta,
+    LineNo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

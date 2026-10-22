@@ -62,6 +62,8 @@ pub struct Editor {
     scroll_col: usize,
     /// Lines PageUp/PageDown move: one screenful less one, from the last frame.
     page: usize,
+    /// Line number gutter on or off (hidden anyway on a narrow terminal).
+    line_numbers: bool,
     /// Open Find / Go to line prompt; it gets every key.
     prompt: Option<Prompt>,
     /// Last accepted search term, for Ctrl-F prefill and F3.
@@ -85,6 +87,7 @@ impl Editor {
             scroll_row: 0,
             scroll_col: 0,
             page: DEFAULT_PAGE,
+            line_numbers: false,
             prompt: None,
             last_search: String::new(),
             line_states: Vec::new(),
@@ -100,6 +103,10 @@ impl Editor {
 
     pub fn set_tag(&mut self, tag: String) {
         self.tag = tag;
+    }
+
+    pub fn set_line_numbers(&mut self, on: bool) {
+        self.line_numbers = on;
     }
 
     pub fn set_message(&mut self, message: String) {
@@ -305,25 +312,42 @@ impl Editor {
                 self.scroll_row = row + 1 - text_rows;
             }
         }
-        if width > 0 {
+        // The gutter takes columns from the left; scrolling uses the rest.
+        let gutter = self.gutter_width(width);
+        let text_width = width - gutter;
+        if text_width > 0 {
             if col < self.scroll_col {
                 self.scroll_col = col;
-            } else if col >= self.scroll_col + width {
-                self.scroll_col = col + 1 - width;
+            } else if col >= self.scroll_col + text_width {
+                self.scroll_col = col + 1 - text_width;
             }
         }
 
-        let lines: Vec<String> = (0..text_rows)
+        let text: Vec<String> = (0..text_rows)
             .map(|i| {
                 let r = self.scroll_row + i;
                 if r < self.buffer.line_count() {
-                    clip(&self.buffer.line(r), self.scroll_col, width)
+                    clip(&self.buffer.line(r), self.scroll_col, text_width)
                 } else {
-                    clip("~", 0, width)
+                    clip("~", 0, text_width)
                 }
             })
             .collect();
-        let styles = self.styles(&lines, width);
+        let mut styles = self.styles(&text, text_width);
+        let mut lines = text;
+        if gutter > 0 {
+            let digits = gutter - 1;
+            for (i, (line, row_styles)) in lines.iter_mut().zip(styles.iter_mut()).enumerate() {
+                let r = self.scroll_row + i;
+                let number = if r < self.buffer.line_count() {
+                    format!("{:>digits$} ", r + 1)
+                } else {
+                    " ".repeat(gutter)
+                };
+                line.insert_str(0, &number);
+                row_styles.splice(0..0, std::iter::repeat_n(Style::LineNo, gutter));
+            }
+        }
 
         View {
             lines,
@@ -335,7 +359,25 @@ impl Editor {
             },
             // With no text rows or no width the scroll is left alone, so the
             // cursor may sit above or left of it: clamp to 0, never underflow.
-            cursor: (row.saturating_sub(self.scroll_row), col.saturating_sub(self.scroll_col)),
+            cursor: (
+                row.saturating_sub(self.scroll_row),
+                gutter + col.saturating_sub(self.scroll_col),
+            ),
+        }
+    }
+
+    /// Gutter columns (number digits plus one space) for a `width` terminal:
+    /// 0 when off or when fewer than 10 text columns would remain.
+    fn gutter_width(&self, width: usize) -> usize {
+        if !self.line_numbers {
+            return 0;
+        }
+        let digits = self.buffer.line_count().to_string().len().max(3);
+        let gutter = digits + 1;
+        if width < gutter + 10 {
+            0
+        } else {
+            gutter
         }
     }
 
@@ -446,6 +488,8 @@ fn clip(text: &str, skip: usize, width: usize) -> String {
     text.chars().skip(skip).take(width).map(sanitize_char).collect()
 }
 
+#[cfg(test)]
+mod gutter_tests;
 #[cfg(test)]
 mod prompt_tests;
 #[cfg(test)]

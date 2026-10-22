@@ -275,6 +275,77 @@ fn save_leaves_no_temp_files_behind() {
     assert_eq!(entries, 1);
 }
 
+#[test]
+fn save_as_writes_sets_the_path_and_clears_modified() {
+    let path = temp_path("save-as");
+    let mut b = typed("hi\nthere");
+    assert!(b.is_modified());
+    b.save_as(path.clone()).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "hi\nthere");
+    assert_eq!(b.path(), Some(path.as_path()));
+    assert!(!b.is_modified());
+}
+
+#[test]
+fn failed_save_as_keeps_the_old_path_and_modified_state() {
+    let path = temp_path("save-as-fail");
+    let missing = path.parent().unwrap().join("no-such-dir").join("x.txt");
+    let mut b = typed("hi");
+    assert!(b.save_as(missing.clone()).is_err());
+    assert_eq!(b.path(), None);
+    assert!(b.is_modified());
+    assert!(!missing.exists());
+    assert!(!missing.parent().unwrap().exists());
+}
+
+#[test]
+fn save_as_never_replaces_an_existing_file() {
+    let path = temp_path("save-as-exists");
+    fs::write(&path, "keep").unwrap();
+    let mut b = typed("new");
+    let err = b.save_as(path.clone()).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "keep");
+    assert_eq!(b.path(), None);
+    assert!(b.is_modified());
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+}
+
+#[test]
+fn save_as_does_not_follow_a_dangling_symlink_or_leave_temp_files() {
+    let path = temp_path("save-as-link");
+    let dir = path.parent().unwrap().to_path_buf();
+    std::os::unix::fs::symlink(dir.join("nowhere"), &path).unwrap();
+    let mut b = typed("new");
+    assert!(b.save_as(path.clone()).is_err());
+    assert!(!dir.join("nowhere").exists());
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+}
+
+#[test]
+fn save_as_leaves_an_existing_temp_named_file_alone() {
+    let path = temp_path("save-as-tmpname");
+    let dir = path.parent().unwrap().to_path_buf();
+    let decoy = dir.join(".file.txt.ted-tmp");
+    fs::write(&decoy, "decoy").unwrap();
+    let mut b = typed("new");
+    b.save_as(path.clone()).unwrap();
+    assert_eq!(fs::read_to_string(&decoy).unwrap(), "decoy");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+}
+
+#[test]
+fn failed_save_as_on_a_named_buffer_keeps_its_path() {
+    let path = temp_path("save-as-named");
+    let mut b = Buffer::open(&path).unwrap();
+    b.insert_char('x');
+    let bad = path.parent().unwrap().join("no-such-dir").join("x.txt");
+    assert!(b.save_as(bad).is_err());
+    assert_eq!(b.path(), Some(path.as_path()));
+    assert!(b.is_modified());
+}
+
 /// Buffer of `lines` lines "aaaa", cursor at (`row`, `col`), dirty row drained.
 fn at(lines: usize, row: usize, col: usize) -> Buffer {
     let mut b = Buffer::from_text(&vec!["aaaa"; lines].join("\n"));

@@ -65,6 +65,15 @@ impl Buffer {
         Ok(())
     }
 
+    /// Writes the text to `path` (atomically). Only on success does the
+    /// buffer take the new path and become unmodified.
+    pub fn save_as(&mut self, path: PathBuf) -> io::Result<()> {
+        write_new(&path, &self.text())?;
+        self.path = Some(path);
+        self.modified = false;
+        Ok(())
+    }
+
     pub fn text(&self) -> String {
         self.rope.to_string()
     }
@@ -390,6 +399,45 @@ fn break_len(line: RopeSlice) -> usize {
 
 /// Writes via a sibling temp file and rename so a failed write never leaves a
 /// half-written file. Follows symlinks and keeps the existing permissions.
+/// Creates `path` with `text`, never replacing anything that exists there
+/// (a file, a directory or a symlink, even a dangling one): `AlreadyExists`.
+/// The text goes to a uniquely named temp file first and is hard-linked into
+/// place, which fails atomically if the target appeared meanwhile.
+fn write_new(path: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not a file path"))?;
+    let mut tmp;
+    let mut file = loop {
+        let mut tmp_name = std::ffi::OsString::from(".");
+        tmp_name.push(name);
+        tmp_name.push(format!(".ted-tmp-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        tmp = path.with_file_name(tmp_name);
+        match fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(file) => break file,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    };
+    let written = file.write_all(text.as_bytes()).and_then(|()| file.sync_all());
+    drop(file);
+    let result = written.and_then(|()| match fs::hard_link(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(e),
+        // No hard links here (some file systems): claim the name with an
+        // empty file, then replace it atomically.
+        Err(_) => {
+            fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+            fs::rename(&tmp, path).inspect_err(|_| {
+                let _ = fs::remove_file(path);
+            })
+        }
+    });
+    let _ = fs::remove_file(&tmp);
+    result
+}
+
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let name = target

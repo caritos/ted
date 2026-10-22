@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::{Buffer, Found};
+use crate::command;
 use crate::highlight::{highlight_line, Language, LineState, Token};
 use crate::screen::Style;
 use crate::text::{display_col, layout, sanitize_char, TAB_STOP};
@@ -32,6 +33,7 @@ pub struct View {
 enum PromptKind {
     Find,
     Goto,
+    Command,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -65,6 +67,8 @@ pub struct Editor {
     line_numbers: bool,
     /// Open Find / Go to line prompt; it gets every key.
     prompt: Option<Prompt>,
+    /// Text of an accepted command prompt, until `take_command`.
+    command: Option<String>,
     /// Last accepted search term, for Ctrl-F prefill and F3.
     last_search: String,
     /// Highlight state at the start of each line (index = row), valid for
@@ -88,6 +92,7 @@ impl Editor {
             page: DEFAULT_PAGE,
             line_numbers: false,
             prompt: None,
+            command: None,
             last_search: String::new(),
             line_states: Vec::new(),
             highlighted: None,
@@ -134,6 +139,9 @@ impl Editor {
     }
 
     fn open_prompt(&mut self, kind: PromptKind) {
+        if kind == PromptKind::Command {
+            self.command = None;
+        }
         let mut prompt = Prompt {
             kind,
             text: String::new(),
@@ -206,6 +214,11 @@ impl Editor {
                             self.buffer.go_to_line(n);
                         }
                     }
+                    PromptKind::Command => {
+                        if !prompt.text.trim().is_empty() {
+                            self.command = Some(prompt.text);
+                        }
+                    }
                 }
                 return;
             }
@@ -229,13 +242,29 @@ impl Editor {
                         prompt.text.push(c);
                     }
                 }
+                PromptKind::Command => prompt.text.push(c),
             },
+            KeyCode::Tab if prompt.kind == PromptKind::Command => {
+                let word = prompt.text.trim_start();
+                if !word.contains(char::is_whitespace) {
+                    let lead = prompt.text.len() - word.len();
+                    let done = command::complete(word);
+                    prompt.text.truncate(lead);
+                    prompt.text.push_str(&done);
+                }
+            }
             KeyCode::Char('f') if ctrl && find => self.step(&mut prompt, true),
             KeyCode::Down if find => self.step(&mut prompt, true),
             KeyCode::Up if find => self.step(&mut prompt, false),
             _ => {}
         }
         self.prompt = Some(prompt);
+    }
+
+    /// The text of the command accepted with Enter, once; `None` if the
+    /// prompt was cancelled or blank.
+    pub fn take_command(&mut self) -> Option<String> {
+        self.command.take()
     }
 
     /// F3: next match of the remembered term after the cursor.
@@ -253,6 +282,18 @@ impl Editor {
     fn prompt_line(&self, prompt: &Prompt) -> String {
         match prompt.kind {
             PromptKind::Goto => format!("Go to line: {}_", prompt.text),
+            PromptKind::Command => {
+                let mut line = format!("Command: {}_", prompt.text);
+                let word = prompt.text.trim_start();
+                if !word.contains(char::is_whitespace) {
+                    let found = command::matches(word);
+                    if !found.is_empty() {
+                        line.push_str("  ");
+                        line.push_str(&found.join(" "));
+                    }
+                }
+                line
+            }
             PromptKind::Find => match prompt.status {
                 FindStatus::Normal => format!("Find: {}_", prompt.text),
                 FindStatus::Wrapped => format!("Find: {} (wrapped)", prompt.text),
@@ -274,6 +315,7 @@ impl Editor {
             KeyCode::Char('s') if ctrl => self.save(),
             KeyCode::Char('f') if ctrl => self.open_prompt(PromptKind::Find),
             KeyCode::Char('l') if ctrl => self.open_prompt(PromptKind::Goto),
+            KeyCode::Char('x') if ctrl => self.open_prompt(PromptKind::Command),
             KeyCode::F(3) => self.find_again(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline(),
@@ -436,12 +478,25 @@ impl Editor {
         rows
     }
 
-    fn save(&mut self) {
+    /// Moves to column 0 of the 1-based `n`, clamped to the buffer.
+    pub fn go_to_line(&mut self, n: usize) {
+        self.buffer.go_to_line(n);
+    }
+
+    pub fn save(&mut self) {
         if self.buffer.path().is_none() {
             self.message = "No file name: start ted with a path to save.".to_string();
             return;
         }
         match self.buffer.save() {
+            Ok(()) => self.message = format!("Saved {} lines", self.buffer.line_count()),
+            Err(e) => self.message = format!("Save failed: {e}"),
+        }
+    }
+
+    /// Saves under a new path; shows the result as the message.
+    pub fn save_as(&mut self, path: std::path::PathBuf) {
+        match self.buffer.save_as(path) {
             Ok(()) => self.message = format!("Saved {} lines", self.buffer.line_count()),
             Err(e) => self.message = format!("Save failed: {e}"),
         }
@@ -503,6 +558,8 @@ fn clip(text: &str, skip: usize, width: usize) -> String {
     text.chars().skip(skip).take(width).map(sanitize_char).collect()
 }
 
+#[cfg(test)]
+mod command_tests;
 #[cfg(test)]
 mod gutter_tests;
 #[cfg(test)]

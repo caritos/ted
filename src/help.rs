@@ -27,6 +27,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Backspace / Delete", "Delete before / under the cursor"),
             ("Ctrl-S", "Save the current buffer"),
             ("Ctrl-F", "Find text"),
+            ("Ctrl-X", "Command prompt (Tab completes)"),
             ("F3", "Find the next match"),
             ("Ctrl-L", "Go to a line number"),
             ("F2", "Show / hide line numbers"),
@@ -72,7 +73,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Enter", "Open a file, toggle a directory, switch buffer"),
             ("Right / Left", "File tree: expand / collapse"),
             ("r", "Changes view: reset the baseline"),
-            ("b", "Changes view: pick a baseline commit (Enter picks, Esc closes)"),
+            ("b", "Pick a baseline commit (Enter picks, Esc closes)"),
             ("q / Esc", "Back to the editor"),
             ("?", "Show this help"),
         ],
@@ -190,7 +191,7 @@ mod tests {
     fn table_lists_every_documented_key() {
         let keys: Vec<&str> = HELP.iter().flat_map(|(_, rows)| rows.iter().flat_map(|(k, _)| k.split(" / "))).collect();
         for name in [
-            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
+            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "Ctrl-X", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
             "Backspace", "Delete", "Enter", "F1", "F2", "Up", "Down", "Left", "Right", "Esc", "r", "b", "q",
         ] {
             assert!(keys.contains(&name), "help table lacks {name}");
@@ -304,6 +305,13 @@ mod tests {
         assert_eq!(h.render(20, 6).message, "hi");
         h.handle_key(key(KeyCode::Down));
         assert_eq!(h.render(20, 6).message, "");
+    }
+
+    #[test]
+    fn no_help_row_is_wider_than_80_columns() {
+        for (text, _) in lines() {
+            assert!(text.chars().count() <= 80, "{text:?}");
+        }
     }
 
     #[test]

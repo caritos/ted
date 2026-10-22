@@ -1,7 +1,7 @@
 use std::io::{self, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyEventKind};
@@ -17,6 +17,9 @@ use ted::buffer::Buffer;
 use ted::editor::{Editor, Flow};
 use ted::git::GitCli;
 use ted::screen::{Screen, Style};
+
+/// How often the git view polls git.
+const TICK: Duration = Duration::from_millis(1000);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -59,6 +62,9 @@ fn run(mut app: App) -> io::Result<()> {
     let _terminal = TerminalGuard::enter()?;
     let mut out = io::stdout();
     let mut drawn: Option<(Screen, (u16, u16))> = None;
+    // A fixed deadline rather than a fresh timeout per event, so a stream
+    // of keys (a held arrow) cannot hold off the refresh.
+    let mut next_tick = Instant::now() + TICK;
     loop {
         let size = terminal::size()?;
         let screen = app.screen(size.0 as usize, size.1 as usize, SystemTime::now());
@@ -67,16 +73,19 @@ fn run(mut app: App) -> io::Result<()> {
             drawn = Some((screen, size));
         }
 
-        if event::poll(Duration::from_millis(1000))? {
-            // Anything other than a key press (including a resize) just redraws.
-            if let Event::Key(key) = event::read()?
-                && key.kind != KeyEventKind::Release
-                && app.handle_key(key, SystemTime::now()) == Flow::Quit
-            {
-                return Ok(());
-            }
-        } else {
+        let now = Instant::now();
+        if now >= next_tick {
             app.tick(SystemTime::now());
+            next_tick = now + TICK;
+            continue;
+        }
+        // Anything other than a key press (including a resize) just redraws.
+        if event::poll(next_tick - now)?
+            && let Event::Key(key) = event::read()?
+            && key.kind != KeyEventKind::Release
+            && app.handle_key(key, SystemTime::now()) == Flow::Quit
+        {
+            return Ok(());
         }
     }
 }

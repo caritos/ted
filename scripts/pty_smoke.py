@@ -30,9 +30,12 @@ def spawn(args):
     return pid, fd
 
 
-def drain(fd, idle=0.4):
+def drain(fd, idle=0.4, limit=3.0):
+    # Stops after `idle` seconds of quiet, or after `limit` seconds in total:
+    # the git view redraws every second (ages tick), so it may never be quiet.
     out = b""
-    while select.select([fd], [], [], idle)[0]:
+    end = time.time() + limit
+    while time.time() < end and select.select([fd], [], [], idle)[0]:
         try:
             chunk = os.read(fd, 65536)
         except OSError:

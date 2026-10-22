@@ -121,10 +121,14 @@ impl App {
         let is_quit = ctrl && key.code == KeyCode::Char('q');
         // Any key but Ctrl-Q withdraws a pending quit warning.
         if !is_quit && std::mem::take(&mut self.quit_armed) {
+            // The warning sits in the editor when armed there, in the view otherwise.
             self.editor_mut().set_message(String::new());
             self.set_view_message(String::new());
         }
         if is_quit {
+            // Ctrl-Q is another key to a pending close warning; its own
+            // warning replaces that message.
+            self.close_armed = false;
             return self.quit();
         }
         let is_close = ctrl && key.code == KeyCode::Char('w');

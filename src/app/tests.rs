@@ -1154,3 +1154,24 @@ fn ctrl_q_then_ctrl_w_then_ctrl_q_does_not_quit() {
     assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
     assert_eq!(app.buffer_count(), 3);
 }
+
+#[test]
+fn ctrl_w_then_ctrl_q_then_ctrl_w_warns_again_and_keeps_edits() {
+    let dir = Temp::new("close-quit-close");
+    let mut app = dirty_buffers(&dir, &[2]);
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    app.handle_key(ctrl('w'), t(1000));
+    assert_eq!(app.buffer_count(), 3);
+    assert!(app.editor().buffer().text().contains('X'));
+    assert_eq!(quit_message(&mut app), CLOSE_WARNING);
+}
+
+#[test]
+fn saving_after_the_quit_warning_lets_quit_through() {
+    let dir = Temp::new("quit-save");
+    let mut app = dirty_buffers(&dir, &[2]);
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    app.handle_key(ctrl('s'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+}

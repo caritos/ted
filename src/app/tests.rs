@@ -189,6 +189,45 @@ fn enter_on_unreadable_file_shows_error_and_stays_in_git_view() {
 }
 
 #[test]
+fn enter_on_file_missing_from_disk_refuses_and_creates_nothing() {
+    let dir = temp_dir("missing");
+    let mut app = app_with(Editor::new(Buffer::new()), dir.clone(), one_file());
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert!(app.in_git_view());
+    assert_eq!(app.screen(60, 6, t(1000)).message, "File no longer exists");
+    assert_eq!(app.editor().buffer().text(), "");
+    assert_eq!(app.editor().buffer().path(), None);
+    assert!(!dir.join("a.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn enter_on_dangling_symlink_refuses() {
+    let dir = temp_dir("dangling");
+    std::os::unix::fs::symlink(dir.join("target.txt"), dir.join("a.txt")).unwrap();
+    let mut app = app_with(Editor::new(Buffer::new()), dir.clone(), one_file());
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert!(app.in_git_view());
+    assert_eq!(app.screen(60, 6, t(1000)).message, "File no longer exists");
+    assert_eq!(app.editor().buffer().path(), None);
+    assert!(!dir.join("target.txt").exists());
+}
+
+#[test]
+fn quit_warning_armed_in_editor_is_cancelled_by_ctrl_g() {
+    let mut app = text_app("", one_file());
+    type_str(&mut app, "x");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    app.handle_key(ctrl('g'), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    let message = app.screen(80, 6, t(1000)).message;
+    assert!(message.contains("Unsaved"), "{message}");
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+}
+
+#[test]
 fn ctrl_q_in_git_view_follows_editor_quit_rules() {
     // Clean buffer: one press quits.
     let mut app = text_app("clean", one_file());

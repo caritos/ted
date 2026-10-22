@@ -85,6 +85,8 @@ impl App {
     }
 
     fn enter_git_view(&mut self, now: SystemTime) {
+        // Ctrl-G is a key like any other: it cancels a pending quit warning.
+        self.editor.cancel_quit();
         let view = self.git_view.get_or_insert_with(GitView::new);
         view.refresh(self.git.as_ref(), now);
         self.in_git_view = true;
@@ -97,7 +99,15 @@ impl App {
             view.set_message("Unsaved changes: save or quit first".to_string());
             return;
         }
-        match Buffer::open(&self.location.join(rel)) {
+        // `Buffer::open` treats a missing file as new, and a later save
+        // would recreate it. `try_exists` follows symlinks, so a dangling
+        // link or an unreadable parent is refused too.
+        let path = self.location.join(rel);
+        if !matches!(path.try_exists(), Ok(true)) {
+            view.set_message("File no longer exists".to_string());
+            return;
+        }
+        match Buffer::open(&path) {
             Ok(buffer) => {
                 self.editor.load(buffer);
                 self.in_git_view = false;

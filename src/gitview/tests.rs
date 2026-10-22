@@ -575,6 +575,15 @@ fn render_error_state_text() {
     let screen = render_git(&git, 60, 6);
     assert_eq!(row_text(&screen.rows[0]), "not a git repository");
     assert!(screen.rows[1..].iter().all(|r| row_text(r).is_empty()));
+    // No change count: the list is hidden, so a count would mislead.
+    assert_eq!(screen.status, format!("{:<60}", "Error"));
+
+    // Also when an error follows a good refresh with changes.
+    let mut git = two_files();
+    let mut view = refreshed(&git);
+    git.fail = Some(GitError::Failed("boom".to_string()));
+    view.refresh(&git, t(1001));
+    assert_eq!(view.render(60, 6, t(1001)).status, format!("{:<60}", "Error"));
 }
 
 #[test]

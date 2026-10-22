@@ -283,6 +283,10 @@ impl GitView {
     }
 
     fn status_text(&self) -> String {
+        // The list is hidden in the error state, so no count either.
+        if self.error.is_some() {
+            return "Error".to_string();
+        }
         let base = match &self.baseline {
             None | Some(Baseline::Empty) => "Baseline: (no commits)".to_string(),
             Some(Baseline::Commit(hash)) => format!("Baseline {}", clip(hash, 7)),

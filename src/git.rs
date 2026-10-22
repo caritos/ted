@@ -165,15 +165,25 @@ impl GitCli {
         GitCli { dir: dir.into() }
     }
 
+    /// Base command for every git call. `GIT_OPTIONAL_LOCKS=0` keeps polling
+    /// from refreshing the index or taking `index.lock`, so the viewer never
+    /// modifies the repo or blocks the user's own git commands.
+    fn command(&self) -> Command {
+        let mut cmd = Command::new("git");
+        cmd.arg("--literal-pathspecs")
+            .arg("-C")
+            .arg(&self.dir)
+            .env("LC_ALL", "C")
+            .env("GIT_OPTIONAL_LOCKS", "0");
+        cmd
+    }
+
     /// Run a read-only git command in `dir`. Exit codes listed in `ok_codes`
     /// besides 0 count as success.
     fn run(&self, args: &[&str], ok_codes: &[i32]) -> Result<Vec<u8>, GitError> {
-        let out = Command::new("git")
-            .arg("--literal-pathspecs")
-            .arg("-C")
-            .arg(&self.dir)
+        let out = self
+            .command()
             .args(args)
-            .env("LC_ALL", "C")
             .output()
             .map_err(|e| GitError::Failed(format!("could not run git: {e}")))?;
         let code = out.status.code();
@@ -200,12 +210,22 @@ impl GitCli {
 impl Git for GitCli {
     fn head(&self) -> Result<Baseline, GitError> {
         self.run(&["rev-parse", "--git-dir"], &[])?;
-        match self.run_text(&["rev-parse", "--verify", "--quiet", "HEAD"], &[]) {
-            Ok(hash) => Ok(Baseline::Commit(hash.trim().to_string())),
-            Err(GitError::NotARepo) => Err(GitError::NotARepo),
-            // A repo with no commits has no HEAD to resolve.
-            Err(GitError::Failed(_)) => Ok(Baseline::Empty),
+        // With --quiet an unresolvable HEAD exits 1 silently; any other
+        // failure (bad config, damaged repo) is a real error.
+        let hash = self.run_text(&["rev-parse", "--verify", "--quiet", "HEAD"], &[1])?;
+        let hash = hash.trim();
+        if !hash.is_empty() {
+            return Ok(Baseline::Commit(hash.to_string()));
         }
+        // Unborn only if HEAD names a branch whose ref genuinely does not
+        // exist; a corrupt ref also fails to resolve and must be an error.
+        let target = self.run_text(&["symbolic-ref", "--quiet", "HEAD"], &[])?;
+        let target = target.trim();
+        self.run(&["show-ref", "--verify", "--quiet", target], &[1])?;
+        if self.run(&["show-ref", "--verify", "--quiet", target], &[]).is_ok() {
+            return Err(GitError::Failed(format!("cannot resolve {target}")));
+        }
+        Ok(Baseline::Empty)
     }
 
     fn baseline_exists(&self, base: &Baseline) -> bool {

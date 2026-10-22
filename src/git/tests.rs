@@ -186,6 +186,28 @@ fn head_of_repo_without_commits_is_empty() {
 }
 
 #[test]
+fn head_with_corrupt_branch_ref_is_an_error_not_empty() {
+    let t = temp_repo("head-corrupt");
+    t.write("a", "1\n");
+    t.commit_all("first");
+    let head = fs::read_to_string(t.path().join(".git/HEAD")).unwrap();
+    let branch_ref = head.trim().strip_prefix("ref: ").unwrap().to_string();
+    fs::write(t.path().join(".git").join(branch_ref), "garbage\n").unwrap();
+    let git = GitCli::new(t.path());
+    assert!(matches!(git.head(), Err(GitError::Failed(_))), "{:?}", git.head());
+}
+
+#[test]
+fn every_git_command_disables_optional_locks() {
+    let t = temp_repo("optional-locks");
+    let cmd = GitCli::new(t.path()).command();
+    let envs: Vec<_> = cmd.get_envs().collect();
+    assert!(envs.iter().any(|(k, v)| {
+        *k == "GIT_OPTIONAL_LOCKS" && *v == Some(std::ffi::OsStr::new("0"))
+    }));
+}
+
+#[test]
 fn head_returns_current_commit_after_commit() {
     let t = temp_repo("head-commit");
     t.write("a", "1\n");

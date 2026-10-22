@@ -216,7 +216,9 @@ fn editor_screen(view: View) -> Screen {
 
 fn spans(text: &str, styles: &[Style]) -> Vec<Span> {
     let mut row: Vec<Span> = Vec::new();
-    for (c, &style) in text.chars().zip(styles) {
+    // A missing style falls back to Normal, so text can never be dropped.
+    for (i, c) in text.chars().enumerate() {
+        let style = styles.get(i).copied().unwrap_or(Style::Normal);
         match row.last_mut() {
             Some(span) if span.style == style => span.text.push(c),
             _ => row.push(Span { text: c.to_string(), style }),

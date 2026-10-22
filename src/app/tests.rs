@@ -787,3 +787,16 @@ fn app_groups_equal_styles_into_spans_and_keeps_text_identical() {
     assert_eq!(screen.rows[1], vec![Span { text: "plain".into(), style: Style::Normal }]);
     assert_eq!(screen.rows[3], vec![Span { text: "~".into(), style: Style::Normal }]);
 }
+
+#[test]
+fn spans_never_drop_text_when_styles_are_short() {
+    let row = spans("abcd", &[Style::Keyword]);
+    assert_eq!(
+        row,
+        vec![
+            Span { text: "a".into(), style: Style::Keyword },
+            Span { text: "bcd".into(), style: Style::Normal },
+        ]
+    );
+    assert_eq!(spans("xy", &[]), vec![Span { text: "xy".into(), style: Style::Normal }]);
+}

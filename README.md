@@ -35,6 +35,21 @@ Press Ctrl-G in the editor to open a read-only git view: changed files on the le
 
 The git view only reads: it never stages, commits or changes the repo or working tree.
 
+## File tree
+
+Press Ctrl-T in the editor to open a read-only file tree rooted at the directory `ted` was started in (for `ted <file>`, the file's parent). Directories come first, then files, each sorted case-insensitively. Dotfiles are shown; `.git` is hidden. It refreshes about once a second while showing. A directory that cannot be read shows a dim `(cannot read)` row and a message. The tree only reads: it never creates, renames or deletes anything.
+
+| Key (file tree) | Action |
+|---|---|
+| Up / Down | Move the selection |
+| PageUp / PageDown | Move 10 rows |
+| Home / End | First / last row |
+| Right | Expand a directory (on an expanded one, move to its first child) |
+| Left | Collapse a directory (on a file or collapsed one, select the parent) |
+| Enter | Toggle a directory; open a file in the editor |
+| `q` / Esc / Ctrl-T | Back to the editor |
+| Ctrl-G | Jump to the changes view (and Ctrl-T in that view jumps to the tree) |
+
 ## Keys
 
 | Key | Action |
@@ -45,6 +60,7 @@ The git view only reads: it never stages, commits or changes the repo or working
 | Tab | Insert 4 spaces |
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |
+| Ctrl-T | Open the file tree (again: back to the editor) |
 | Ctrl-S | Save |
 | Ctrl-Q | Quit. With unsaved changes it warns first; press Ctrl-Q again to quit without saving. Any other key cancels the warning |
 
@@ -60,7 +76,9 @@ src/editor.rs   Key handling, scrolling, status and messages, quit confirmation.
                 Editor::view(width, height) returns a plain View value to draw.
 src/git.rs      Read-only `git` CLI wrapper behind a trait (status, diff, log).
 src/gitview.rs  Git view state: file list, selection, diff scroll, commit picker.
-src/app.rs      Owns the editor and git view; switches between them.
+src/text.rs     Shared text helpers (width fitting, truncation).
+src/filetree.rs Read-only file tree state: expansion, selection, rendering.
+src/app.rs      Owns the editor, git view and file tree; switches between them.
 src/screen.rs   Plain Screen value both modes render to.
 src/main.rs     Thin crossterm layer: raw mode, read keys, draw the View,
                 restore the terminal on exit, error and panic.
@@ -69,7 +87,7 @@ scripts/pty_smoke.py   Drives the release binary through a pseudo-terminal.
 
 Dependencies: `crossterm` (terminal input and output) and `ropey` (text storage). There is no `ratatui` on purpose; the editor draws its own screen.
 
-Design rule: all logic lives in the library (`buffer`, `editor`, `git`, `gitview`, `app`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
+Design rule: all logic lives in the library (`buffer`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
 
 Known simplifications:
 - Columns count Rust `char`s, not display cells, so emoji and CJK characters misalign the cursor.
@@ -78,18 +96,18 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 130 unit tests
+cargo test                                   # 180 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
 
-The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory (26 checks).
+The pty smoke test runs the real binary: type, save, quit, the unsaved-changes warning, editing an existing file, refusing a non-UTF-8 file, the usage error, and that the screen is restored on exit. It also opens the git view in a temporary repo (changed and untracked files, a `+` diff line, `q` back to the editor) and in a non-repo directory (26 checks), plus a further scenario (13 checks, 39 in total) opens the file tree in a temporary directory: Ctrl-T lists entries and a dotfile, Right expands a directory, Enter opens a file, Ctrl-T twice returns to the editor, Ctrl-Q exits 0.
 
-Verified by hand in a real terminal: save, quit, add text, delete text. Unit tests and the pty test do not prove look and feel, window resizing, Option/Alt keys, the git view's live refresh while another process edits files, its colors, or its behavior in a very large repo; those are still unchecked.
+Verified by hand in a real terminal: save, quit, add text, delete text. Unit tests and the pty test do not prove look and feel, window resizing, Option/Alt keys, the git view's live refresh while another process edits files, its colors, or its behavior in a very large repo; likewise the file tree's colors, resize, a very large directory and symlinked directories; those are still unchecked.
 
 ## Not yet
 
-Home/End, PageUp/PageDown, undo, search, a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate.
+Home/End, PageUp/PageDown, undo, search, a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

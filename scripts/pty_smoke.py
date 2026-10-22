@@ -217,6 +217,59 @@ if code is None:
     os.kill(pid, 9)
     os.waitpid(pid, 0)
 shutil.rmtree(slow, ignore_errors=True)
+# 10. file tree: Ctrl-T lists the start directory, Right expands, Enter opens a
+# file, Ctrl-T toggles back to the editor.
+CTRL_T = b"\x14"
+tree = tempfile.mkdtemp(prefix="ted-smoke-tree-")
+pid = None
+try:
+    os.mkdir(os.path.join(tree, "sub"))
+    open(os.path.join(tree, "sub", "inner.txt"), "w").write("inner\n")
+    open(os.path.join(tree, "top.txt"), "w").write("hello top\n")
+    open(os.path.join(tree, ".hidden"), "w").write("dot\n")
+    pid, fd = spawn([tree])
+    drain(fd)
+    send(fd, CTRL_T)
+    out = drain(fd, 0.5, 2.0)
+    check("tree shows status row", b"Files:" in out, out[-300:])
+    check("tree lists top.txt", b"top.txt" in out, out[-300:])
+    check("tree lists collapsed sub/", b"> sub/" in out, out[-300:])
+    check("tree shows dotfile", b".hidden" in out, out[-300:])
+    check("tree hides collapsed contents", b"inner.txt" not in out, out[-300:])
+    send(fd, b"\x1b[B")  # Down, then Up: selection starts on sub/ either way
+    send(fd, b"\x1b[A")
+    send(fd, b"\x1b[C")  # Right expands sub/
+    out = drain(fd, 0.5, 2.0)
+    check("Right expands sub/", b"v sub/" in out, out[-300:])
+    check("expanded child is indented", b"    inner.txt" in out, out[-300:])
+    for _ in range(3):  # inner.txt, .hidden, top.txt
+        send(fd, b"\x1b[B")
+    drain(fd)
+    send(fd, b"\r")
+    out = drain(fd, 0.5, 2.0)
+    check("Enter opens file in editor", b"hello top" in out and b"Files:" not in out, out[-300:])
+    check("status shows opened file name", b"top.txt" in out, out[-300:])
+    send(fd, CTRL_T)
+    out = drain(fd, 0.5, 2.0)
+    check("Ctrl-T shows tree again", b"Files:" in out, out[-300:])
+    send(fd, CTRL_T)
+    out = drain(fd, 0.5, 2.0)
+    check("Ctrl-T in tree returns to editor", b"hello top" in out and b"Files:" not in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("tree session exits 0", code == 0, code)
+    if code is not None:
+        pid = None  # already reaped
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    shutil.rmtree(tree, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

@@ -7,7 +7,9 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - `src/editor.rs` - key handling, scrolling, status/message, quit confirmation. `Editor::view()` returns a pure `View`.
 - `src/git.rs` - runs the `git` CLI (read-only) behind a `Git` trait: status, diff, log, baseline. No terminal code.
 - `src/gitview.rs` - git view state machine: file list, selection by path, diff scroll, commit picker, refresh.
-- `src/app.rs` - owns the `Editor` and the optional git view; Ctrl-G / `q` switch modes.
+- `src/text.rs` - shared text helpers (width fitting, truncation) used by the views.
+- `src/filetree.rs` - read-only file tree state (expansion, selection, refresh, rendering to rows). No terminal code.
+- `src/app.rs` - owns the `Editor`, the optional git view and file tree (`Mode` enum); Ctrl-G / Ctrl-T / `q` switch modes.
 - `src/screen.rs` - plain `Screen` value (cells + styles) that both modes render to.
 - `src/main.rs` - thin crossterm layer only: raw mode, read keys, draw the `View`. Keep logic out of it.
 - `scripts/pty_smoke.py` - drives the release binary through a pty.
@@ -24,6 +26,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-22 (file tree)
+- Done (unit-tested): `FileTree` state machine (expand/collapse, selection, Enter/Left/Right, PageUp/Down, Home/End, unreadable dirs, refresh), rendering with `Style::Dir`, `App` Mode enum with Ctrl-T / Ctrl-G cross-switching.
+- Done (pty smoke): Ctrl-T lists entries and a dotfile, Right expands `sub/`, Enter opens `top.txt`, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. Seen failing with the Ctrl-T handler stubbed out.
+- Not yet verified by hand: colors, resize, a very large directory, symlinked directories in real use.
+- Deferred: sidebar next to the editor, git status marks in the tree, create/rename/delete, filtering/search, hidden-file toggle.
 ### 2026-10-22
 - Done (unit-tested + pty smoke): open/edit/save file, arrows, Backspace/Delete/Enter/Tab(4 spaces), Ctrl-S, Ctrl-Q with unsaved-changes confirm, scrolling, status bar.
 - Confirmed by hand in a real terminal (2026-10-22): save, quit, add text, delete text.

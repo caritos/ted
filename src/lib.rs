@@ -5,6 +5,7 @@ pub mod editor;
 pub mod filetree;
 pub mod git;
 pub mod gitview;
+pub mod help;
 pub mod highlight;
 pub mod screen;
 pub mod text;

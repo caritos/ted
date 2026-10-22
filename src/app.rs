@@ -11,6 +11,7 @@ use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
 use crate::git::Git;
 use crate::gitview::{GitAction, GitView};
+use crate::help::{Help, HelpAction};
 use crate::screen::{Screen, Span, Style};
 
 /// Largest file the views will open (64 MiB); `Buffer::open` reads it all.
@@ -23,6 +24,7 @@ enum Mode {
     GitView,
     Files,
     Buffers,
+    Help,
 }
 
 pub struct App {
@@ -45,11 +47,46 @@ pub struct App {
     close_armed: bool,
     /// Ctrl-Q warned about modified buffers; the next Ctrl-Q quits.
     quit_armed: bool,
+    help: Help,
+    /// The mode F1 was pressed in; closing help returns there.
+    help_from: Mode,
 }
 
 impl App {
-    pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
-        App { editors: vec![editor], current: 0, location, git, git_view: None, file_tree: None, buffer_list: None, mode: Mode::Editor, close_armed: false, quit_armed: false }
+    pub fn new(mut editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
+        // One-time hint; the first key clears it like any message.
+        editor.set_message("F1: help".to_string());
+        App {
+            editors: vec![editor],
+            current: 0,
+            location,
+            git,
+            git_view: None,
+            file_tree: None,
+            buffer_list: None,
+            mode: Mode::Editor,
+            close_armed: false,
+            quit_armed: false,
+            help: Help::new(),
+            help_from: Mode::Editor,
+        }
+    }
+
+    pub fn in_help(&self) -> bool {
+        self.mode == Mode::Help
+    }
+
+    fn enter_help(&mut self) {
+        if self.mode == Mode::Help {
+            return;
+        }
+        if self.mode == Mode::Editor {
+            self.editor_mut().set_message(String::new());
+        }
+        self.close_picker();
+        self.help_from = self.mode;
+        self.help.reset();
+        self.mode = Mode::Help;
     }
 
     pub fn in_git_view(&self) -> bool {
@@ -166,6 +203,13 @@ impl App {
             self.enter_buffer_list();
             return Flow::Continue;
         }
+        let plain = !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        // `?` is text in the editor, so only the views (no text input) take it.
+        let help_key = key.code == KeyCode::F(1) || (plain && key.code == KeyCode::Char('?') && self.mode != Mode::Editor);
+        if help_key && self.mode != Mode::Help {
+            self.enter_help();
+            return Flow::Continue;
+        }
         if self.mode == Mode::Editor {
             if ctrl && key.code == KeyCode::Char('g') {
                 self.enter_git_view(now);
@@ -221,6 +265,12 @@ impl App {
                     ListAction::ToggleTree => self.enter_file_tree(),
                 }
             }
+            Mode::Help => match self.help.handle_key(key) {
+                HelpAction::None => {}
+                HelpAction::Back => self.mode = self.help_from,
+                HelpAction::ToggleGit => self.enter_git_view(now),
+                HelpAction::ToggleTree => self.enter_file_tree(),
+            },
         }
         Flow::Continue
     }
@@ -239,7 +289,7 @@ impl App {
                     tree.refresh();
                 }
             }
-            Mode::Buffers => {}
+            Mode::Buffers | Mode::Help => {}
         }
     }
 
@@ -247,6 +297,9 @@ impl App {
         let n = self.editors.len();
         let tag = if n > 1 { format!("[{}/{}]", self.current + 1, n) } else { String::new() };
         self.editor_mut().set_tag(tag);
+        if self.mode == Mode::Help {
+            return self.help.render(width, height);
+        }
         match (self.mode, &self.git_view, &self.file_tree, &self.buffer_list) {
             (Mode::GitView, Some(view), _, _) => view.render(width, height, now),
             (Mode::Files, _, Some(tree), _) => tree.render(width, height),
@@ -301,6 +354,7 @@ impl App {
                     list.set_message(message);
                 }
             }
+            Mode::Help => self.help.set_message(message),
         }
     }
 

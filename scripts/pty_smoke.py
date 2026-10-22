@@ -436,6 +436,44 @@ finally:
             pass
     shutil.rmtree(pg, ignore_errors=True)
 
+# 15. F1 opens the help screen, `q` returns to the editor text.
+F1 = b"\x1bOP"
+hp = tempfile.mkdtemp(prefix="ted-smoke-help-")
+pid = fd = None
+try:
+    p = os.path.join(hp, "h.txt")
+    with open(p, "w") as f:
+        f.write("hello help body\n")
+    pid, fd = spawn([p])
+    out = drain(fd)
+    check("help: initial hint shown", b"F1: help" in out, out[-300:])
+    send(fd, F1)
+    out = drain(fd, 0.5, 2.0)
+    check("help: F1 shows the Help screen", b"Help" in out and b"(q to close)" in out, out[-300:])
+    check("help: lists Ctrl-S and Ctrl-Q", b"Ctrl-S" in out and b"Ctrl-Q" in out, out[-300:])
+    send(fd, b"q")
+    out = drain(fd, 0.5, 2.0)
+    check("help: q returns to the editor text", b"hello help body" in out and b"(q to close)" not in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("help: session exits 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(hp, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

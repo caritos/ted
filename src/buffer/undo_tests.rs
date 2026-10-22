@@ -1,8 +1,26 @@
 use super::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-fn temp_path(name: &str) -> PathBuf {
+/// A path in a fresh temp dir that is removed when this is dropped.
+struct Tmp(PathBuf);
+
+impl std::ops::Deref for Tmp {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Tmp {
+    fn drop(&mut self) {
+        if let Some(dir) = self.0.parent() {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+}
+
+fn temp_path(name: &str) -> Tmp {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -13,7 +31,7 @@ fn temp_path(name: &str) -> PathBuf {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    dir.join("file.txt")
+    Tmp(dir.join("file.txt"))
 }
 
 fn type_str(b: &mut Buffer, text: &str) {
@@ -273,7 +291,7 @@ fn save_as_records_the_clean_position_too() {
     let path = temp_path("d");
     let mut b = Buffer::new();
     type_str(&mut b, "hi");
-    b.save_as(path).unwrap();
+    b.save_as(path.to_path_buf()).unwrap();
     assert!(!b.is_modified());
     b.undo();
     assert!(b.is_modified());
@@ -460,7 +478,8 @@ fn random_run(seed: u64, split_steps: bool) {
     let mut rng = Rng(seed);
     let initial = starts[rng.below(starts.len())];
     let mut b = Buffer::from_text(initial);
-    b.path = Some(temp_path("rand"));
+    let tmp = temp_path("rand");
+    b.path = Some(tmp.to_path_buf());
     let mut prev = rows(&b);
     b.take_dirty_row();
     // Model: the text at each history position, the position and clean state.
@@ -564,4 +583,131 @@ fn randomized_edits_with_merging_round_trip() {
     for seed in 1000..1300 {
         random_run(seed, false);
     }
+}
+
+#[test]
+fn typing_after_an_undo_does_not_merge_into_the_older_edit() {
+    let mut b = Buffer::new();
+    type_str(&mut b, "ab");
+    b.move_left();
+    b.move_right();
+    type_str(&mut b, "cd");
+    assert!(b.undo());
+    assert_eq!(b.text(), "ab");
+    type_str(&mut b, "e");
+    assert!(b.undo());
+    assert_eq!(b.text(), "ab");
+}
+
+#[test]
+fn typing_after_a_redo_does_not_merge_into_the_redone_edit() {
+    let mut b = Buffer::new();
+    type_str(&mut b, "ab");
+    b.move_left();
+    b.move_right();
+    type_str(&mut b, "cd");
+    assert!(b.undo());
+    assert!(b.redo());
+    type_str(&mut b, "e");
+    assert!(b.undo());
+    assert_eq!(b.text(), "abcd");
+}
+
+#[test]
+fn every_kind_of_movement_splits_a_typing_run() {
+    type Move = fn(&mut Buffer);
+    let moves: Vec<(&str, Move)> = vec![
+        ("left", |b| {
+            b.move_left();
+            b.move_right();
+        }),
+        ("right", |b| {
+            b.move_right();
+            b.move_left();
+        }),
+        ("up", |b| {
+            b.move_up();
+        }),
+        ("down", |b| {
+            b.move_down();
+            b.move_up();
+        }),
+        ("home", |b| {
+            b.move_home();
+            b.move_end();
+        }),
+        ("end", |b| {
+            b.move_end();
+        }),
+        ("up_by", |b| {
+            b.move_down_by(1);
+            b.move_up_by(1);
+        }),
+        ("set_cursor", |b| b.set_cursor(0, 3)),
+        ("go_to_line", |b| {
+            b.go_to_line(1);
+            b.move_end();
+        }),
+    ];
+    for (name, go) in moves {
+        let mut b = Buffer::from_text("ab\nxx");
+        b.set_cursor(0, 2);
+        b.insert_char('c');
+        let at = b.cursor();
+        go(&mut b);
+        assert_eq!(b.cursor(), at, "{name} did not return to the same spot");
+        b.insert_char('d');
+        assert!(b.undo(), "{name}");
+        assert_eq!(b.text(), "abc\nxx", "{name}: the move did not split the run");
+    }
+}
+
+#[test]
+fn merging_a_long_run_stays_linear() {
+    use std::time::Instant;
+    const N: usize = 100_000;
+    let start = Instant::now();
+    let mut typing = Edit::new(0, "", "a", 0, 1, false);
+    let mut back = Edit::new(N - 1, "a", "", N, N - 1, true);
+    let mut delete = Edit::new(0, "a", "", 0, 0, false);
+    for i in 1..N {
+        assert!(typing.merge(&Edit::new(i, "", "a", i, i + 1, false)));
+        assert!(back.merge(&Edit::new(N - 1 - i, "a", "", N - i, N - 1 - i, true)));
+        assert!(delete.merge(&Edit::new(0, "a", "", 0, 0, false)));
+    }
+    assert_eq!(typing.inserted_len, N);
+    assert_eq!(back.removed_text().len(), N);
+    assert_eq!(back.index, 0);
+    assert_eq!(delete.removed_text().len(), N);
+    let took = start.elapsed();
+    assert!(took.as_secs_f64() < 2.0, "merging 3 x 100k edits took {took:?}");
+}
+
+#[test]
+fn long_typing_backspace_and_delete_runs_stay_linear() {
+    use std::time::Instant;
+    const N: usize = 20_000;
+    let start = Instant::now();
+    let mut b = Buffer::new();
+    for _ in 0..N {
+        b.insert_char('a');
+    }
+    for _ in 0..N {
+        b.backspace();
+    }
+    assert_eq!(b.text(), "");
+    assert!(b.undo()); // the whole backspace run
+    assert_eq!(b.text().len(), N);
+    assert!(b.undo()); // the whole typing run
+    assert_eq!(b.text(), "");
+    let mut b = Buffer::from_text(&"a".repeat(N));
+    for _ in 0..N {
+        b.delete();
+    }
+    assert_eq!(b.text(), "");
+    assert!(b.undo());
+    assert_eq!(b.text().len(), N);
+    assert!(!b.undo());
+    let took = start.elapsed();
+    assert!(took.as_secs_f64() < 8.0, "20k-char runs took {took:?}");
 }

@@ -1,4 +1,5 @@
 use std::fs;
+use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,7 @@ pub struct Buffer {
     goal_col: usize,
     path: Option<PathBuf>,
     /// Applied edits, oldest first; its length is the history position.
-    undo: Vec<Edit>,
+    undo: VecDeque<Edit>,
     /// Undone edits, the next one to redo last.
     redo: Vec<Edit>,
     /// History position at the last open or save; `None` once unreachable.
@@ -43,7 +44,7 @@ impl Buffer {
             col: 0,
             goal_col: 0,
             path: None,
-            undo: Vec::new(),
+            undo: VecDeque::new(),
             redo: Vec::new(),
             clean: Some(0),
             merge_ok: false,
@@ -122,8 +123,8 @@ impl Buffer {
 
     /// Undoes the last edit step. False when there is nothing to undo.
     pub fn undo(&mut self) -> bool {
-        let Some(edit) = self.undo.pop() else { return false };
-        self.apply(edit.index, edit.inserted.chars().count(), &edit.removed);
+        let Some(edit) = self.undo.pop_back() else { return false };
+        self.apply(edit.index, edit.inserted_len, &edit.removed_text());
         self.place_cursor(edit.before);
         self.goal_col = self.col;
         self.redo.push(edit);
@@ -134,10 +135,10 @@ impl Buffer {
     /// Redoes the last undone step. False when there is nothing to redo.
     pub fn redo(&mut self) -> bool {
         let Some(edit) = self.redo.pop() else { return false };
-        self.apply(edit.index, edit.removed.chars().count(), &edit.inserted);
+        self.apply(edit.index, edit.removed.len(), &edit.inserted);
         self.place_cursor(edit.after);
         self.goal_col = self.col;
-        self.undo.push(edit);
+        self.undo.push_back(edit);
         self.merge_ok = false;
         true
     }
@@ -167,14 +168,14 @@ impl Buffer {
         let len = self.undo.len();
         if self.merge_ok
             && self.clean != Some(len)
-            && let Some(last) = self.undo.last_mut()
+            && let Some(last) = self.undo.back_mut()
             && last.merge(&edit)
         {
             return;
         }
-        self.undo.push(edit);
+        self.undo.push_back(edit);
         if self.undo.len() > MAX_EDITS {
-            self.undo.remove(0);
+            self.undo.pop_front();
             self.clean = self.clean.and_then(|c| c.checked_sub(1));
         }
         self.merge_ok = true;
@@ -198,7 +199,7 @@ impl Buffer {
         self.rope.insert_char(index, c);
         self.col += 1;
         self.goal_col = self.col;
-        self.record(Edit::new(index, "", &c.to_string(), index, index + 1));
+        self.record(Edit::new(index, "", &c.to_string(), index, index + 1, false));
     }
 
     pub fn insert_newline(&mut self) {
@@ -210,7 +211,7 @@ impl Buffer {
         // row cannot simply be incremented.
         self.place_cursor(index + 1);
         self.goal_col = self.col;
-        self.record(Edit::new(index, "", "\n", index, index + 1));
+        self.record(Edit::new(index, "", "\n", index, index + 1, false));
     }
 
     pub fn backspace(&mut self) {
@@ -231,7 +232,7 @@ impl Buffer {
         self.rope.remove(start..index);
         self.place_cursor(start);
         self.goal_col = self.col;
-        self.record(Edit::new(start, &removed, "", index, start));
+        self.record(Edit::new(start, &removed, "", index, start, true));
     }
 
     pub fn delete(&mut self) {
@@ -250,7 +251,7 @@ impl Buffer {
         let removed = self.rope.slice(index..end).to_string();
         self.rope.remove(index..end);
         self.place_cursor(index);
-        self.record(Edit::new(index, &removed, "", index, index));
+        self.record(Edit::new(index, &removed, "", index, index, false));
     }
 
     pub fn move_left(&mut self) {
@@ -413,59 +414,84 @@ impl Buffer {
 /// Most steps kept in the undo history; the oldest are dropped.
 const MAX_EDITS: usize = 10_000;
 
-/// One undoable step: at char `index`, `removed` was replaced by `inserted`.
-/// `before` / `after` are the cursor's char index around the step.
+/// One undoable step: at char `index`, the removed chars were replaced by
+/// `inserted`. `before` / `after` are the cursor's char index around the step.
+/// Run-merging only looks at the new piece, so a long run stays linear.
 #[derive(Debug)]
 struct Edit {
     index: usize,
-    removed: String,
+    /// Removed chars in removal order: text order, or reversed when `rev`
+    /// (Backspace runs grow backwards, so they are pushed in O(1)).
+    removed: Vec<char>,
+    rev: bool,
     inserted: String,
+    inserted_len: usize,
+    /// No line-break char removed or inserted (such a step never merges).
+    plain: bool,
     before: usize,
     after: usize,
 }
 
 impl Edit {
-    fn new(index: usize, removed: &str, inserted: &str, before: usize, after: usize) -> Self {
-        Edit { index, removed: removed.to_string(), inserted: inserted.to_string(), before, after }
+    fn new(index: usize, removed: &str, inserted: &str, before: usize, after: usize, rev: bool) -> Self {
+        let mut chars: Vec<char> = removed.chars().collect();
+        if rev {
+            chars.reverse();
+        }
+        Edit {
+            index,
+            plain: !chars.iter().copied().chain(inserted.chars()).any(is_break),
+            removed: chars,
+            rev,
+            inserted: inserted.to_string(),
+            inserted_len: inserted.chars().count(),
+            before,
+            after,
+        }
+    }
+
+    /// The removed text in document order.
+    fn removed_text(&self) -> String {
+        if self.rev {
+            self.removed.iter().rev().collect()
+        } else {
+            self.removed.iter().collect()
+        }
     }
 
     /// Folds `next` (performed right after `self`) into `self` if both are
     /// part of one run of typing, Backspaces or Deletes of non-break chars.
     fn merge(&mut self, next: &Edit) -> bool {
-        let plain = |s: &str| !s.is_empty() && !s.chars().any(is_break);
-        let len = |s: &str| s.chars().count();
-        if self.after != next.before {
+        if self.after != next.before || !self.plain || !next.plain {
             return false;
         }
-        let typing = self.removed.is_empty()
-            && next.removed.is_empty()
-            && plain(&self.inserted)
-            && plain(&next.inserted)
-            && self.index + len(&self.inserted) == next.index;
-        if typing {
+        if self.removed.is_empty() && next.removed.is_empty() {
+            if self.inserted.is_empty() || self.index + self.inserted_len != next.index {
+                return false;
+            }
             self.inserted.push_str(&next.inserted);
+            self.inserted_len += next.inserted_len;
             self.after = next.after;
             return true;
         }
-        let removals = self.inserted.is_empty()
-            && next.inserted.is_empty()
-            && plain(&self.removed)
-            && plain(&next.removed);
-        if !removals {
+        if !self.inserted.is_empty() || !next.inserted.is_empty() || self.rev != next.rev {
             return false;
         }
-        let back = |e: &Edit| e.before == e.index + len(&e.removed);
-        if back(self) && back(next) && next.index + len(&next.removed) == self.index {
-            self.removed.insert_str(0, &next.removed);
+        if self.rev {
+            if next.index + next.removed.len() != self.index {
+                return false;
+            }
+            self.removed.extend_from_slice(&next.removed);
             self.index = next.index;
             self.after = next.after;
-            return true;
+            true
+        } else {
+            if next.index != self.index {
+                return false;
+            }
+            self.removed.extend_from_slice(&next.removed);
+            true
         }
-        if self.before == self.index && next.before == next.index && next.index == self.index {
-            self.removed.push_str(&next.removed);
-            return true;
-        }
-        false
     }
 }
 

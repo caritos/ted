@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, Found};
 use crate::highlight::{highlight_line, Language, LineState, Token};
 use crate::screen::Style;
 use crate::text::sanitize_char;
@@ -29,6 +29,30 @@ pub struct View {
     pub cursor: (usize, usize),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PromptKind {
+    Find,
+    Goto,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FindStatus {
+    Normal,
+    Wrapped,
+    NotFound,
+}
+
+struct Prompt {
+    kind: PromptKind,
+    text: String,
+    /// Cursor and scroll (row, col) when the prompt opened; Esc restores them.
+    origin: (usize, usize),
+    scroll: (usize, usize),
+    /// Current match, the start for next/previous.
+    current: Option<(usize, usize)>,
+    status: FindStatus,
+}
+
 pub struct Editor {
     buffer: Buffer,
     message: String,
@@ -38,6 +62,10 @@ pub struct Editor {
     scroll_col: usize,
     /// Lines PageUp/PageDown move: one screenful less one, from the last frame.
     page: usize,
+    /// Open Find / Go to line prompt; it gets every key.
+    prompt: Option<Prompt>,
+    /// Last accepted search term, for Ctrl-F prefill and F3.
+    last_search: String,
     /// Highlight state at the start of each line (index = row), valid for
     /// every entry; extended lazily and truncated at the first edited row.
     line_states: Vec<LineState>,
@@ -57,6 +85,8 @@ impl Editor {
             scroll_row: 0,
             scroll_col: 0,
             page: DEFAULT_PAGE,
+            prompt: None,
+            last_search: String::new(),
             line_states: Vec::new(),
             highlighted: None,
             #[cfg(test)]
@@ -80,13 +110,162 @@ impl Editor {
         &self.message
     }
 
+    pub fn in_prompt(&self) -> bool {
+        self.prompt.is_some()
+    }
+
+    /// Closes an open prompt as Esc does: cursor and scroll go back.
+    pub fn cancel_prompt(&mut self) {
+        if let Some(prompt) = self.prompt.take() {
+            self.restore_origin(&prompt);
+        }
+    }
+
+    fn restore_origin(&mut self, prompt: &Prompt) {
+        self.buffer.set_cursor(prompt.origin.0, prompt.origin.1);
+        self.scroll_row = prompt.scroll.0;
+        self.scroll_col = prompt.scroll.1;
+    }
+
+    fn open_prompt(&mut self, kind: PromptKind) {
+        let mut prompt = Prompt {
+            kind,
+            text: String::new(),
+            origin: self.buffer.cursor(),
+            scroll: (self.scroll_row, self.scroll_col),
+            current: None,
+            status: FindStatus::Normal,
+        };
+        if kind == PromptKind::Find && !self.last_search.is_empty() {
+            prompt.text = self.last_search.clone();
+            self.search_from_origin(&mut prompt);
+        }
+        self.prompt = Some(prompt);
+    }
+
+    /// Incremental search: always from where the prompt opened.
+    fn search_from_origin(&mut self, prompt: &mut Prompt) {
+        if prompt.text.is_empty() {
+            self.restore_origin(prompt);
+            prompt.current = None;
+            prompt.status = FindStatus::Normal;
+            return;
+        }
+        let found = self.buffer.find(&prompt.text, prompt.origin, true, true);
+        self.apply_found(prompt, found);
+    }
+
+    fn step(&mut self, prompt: &mut Prompt, forward: bool) {
+        if prompt.text.is_empty() {
+            return;
+        }
+        let from = prompt.current.unwrap_or(prompt.origin);
+        let found = self.buffer.find(&prompt.text, from, forward, false);
+        self.apply_found(prompt, found);
+    }
+
+    fn apply_found(&mut self, prompt: &mut Prompt, found: Option<Found>) {
+        match found {
+            Some(f) => {
+                self.buffer.set_cursor(f.row, f.col);
+                prompt.current = Some(self.buffer.cursor());
+                prompt.status = if f.wrapped { FindStatus::Wrapped } else { FindStatus::Normal };
+            }
+            None => prompt.status = FindStatus::NotFound,
+        }
+    }
+
+    fn prompt_key(&mut self, mut prompt: Prompt, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let find = prompt.kind == PromptKind::Find;
+        match key.code {
+            KeyCode::Esc => {
+                self.restore_origin(&prompt);
+                return;
+            }
+            KeyCode::Enter => {
+                match prompt.kind {
+                    PromptKind::Find => {
+                        if !prompt.text.is_empty() {
+                            self.last_search = prompt.text;
+                        }
+                    }
+                    PromptKind::Goto => {
+                        let n = prompt.text.parse::<usize>().unwrap_or(usize::MAX);
+                        if !prompt.text.is_empty() && n > 0 {
+                            self.buffer.go_to_line(n);
+                        }
+                    }
+                }
+                return;
+            }
+            KeyCode::Backspace => {
+                if prompt.text.pop().is_some() && find {
+                    self.search_from_origin(&mut prompt);
+                }
+            }
+            KeyCode::Char(c) if !ctrl && !alt => match prompt.kind {
+                PromptKind::Find => {
+                    prompt.text.push(c);
+                    self.search_from_origin(&mut prompt);
+                }
+                PromptKind::Goto => {
+                    if c.is_ascii_digit() {
+                        prompt.text.push(c);
+                    }
+                }
+            },
+            KeyCode::Char('f') if ctrl && find => self.step(&mut prompt, true),
+            KeyCode::Down if find => self.step(&mut prompt, true),
+            KeyCode::Up if find => self.step(&mut prompt, false),
+            _ => {}
+        }
+        self.prompt = Some(prompt);
+    }
+
+    /// F3: next match of the remembered term after the cursor.
+    fn find_again(&mut self) {
+        if self.last_search.is_empty() {
+            self.message = "No previous search".to_string();
+            return;
+        }
+        match self.buffer.find(&self.last_search, self.buffer.cursor(), true, false) {
+            Some(f) => self.buffer.set_cursor(f.row, f.col),
+            None => self.message = format!("Not found: {}", self.last_search),
+        }
+    }
+
+    fn prompt_line(&self, prompt: &Prompt) -> String {
+        match prompt.kind {
+            PromptKind::Goto => format!("Go to line: {}_", prompt.text),
+            PromptKind::Find => match prompt.status {
+                FindStatus::Normal => format!("Find: {}_", prompt.text),
+                FindStatus::Wrapped => format!("Find: {} (wrapped)", prompt.text),
+                FindStatus::NotFound => format!("Find: {} (not found)", prompt.text),
+            },
+        }
+    }
+
+    #[cfg(test)]
+    fn buffer_mut_for_test(&mut self) -> &mut Buffer {
+        &mut self.buffer
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> Flow {
         self.message.clear();
+        if let Some(prompt) = self.prompt.take() {
+            self.prompt_key(prompt, key);
+            return Flow::Continue;
+        }
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Char('s') if ctrl => self.save(),
+            KeyCode::Char('f') if ctrl => self.open_prompt(PromptKind::Find),
+            KeyCode::Char('l') if ctrl => self.open_prompt(PromptKind::Goto),
+            KeyCode::F(3) => self.find_again(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline(),
             KeyCode::Backspace => self.buffer.backspace(),
@@ -147,7 +326,10 @@ impl Editor {
             lines,
             styles,
             status: clip(&self.status_line(width), 0, width),
-            message: clip(&self.message, 0, width),
+            message: match &self.prompt {
+                Some(prompt) => clip(&self.prompt_line(prompt), 0, width),
+                None => clip(&self.message, 0, width),
+            },
             // With no text rows or no width the scroll is left alone, so the
             // cursor may sit above or left of it: clamp to 0, never underflow.
             cursor: (row.saturating_sub(self.scroll_row), col.saturating_sub(self.scroll_col)),
@@ -261,5 +443,7 @@ fn clip(text: &str, skip: usize, width: usize) -> String {
     text.chars().skip(skip).take(width).map(sanitize_char).collect()
 }
 
+#[cfg(test)]
+mod prompt_tests;
 #[cfg(test)]
 mod tests;

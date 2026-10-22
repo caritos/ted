@@ -76,24 +76,24 @@ Saving writes to a temporary sibling file and renames it over the target, so a f
 ## How it is built
 
 ```
-src/buffer.rs   Rope-backed text, cursor, load and atomic save. No terminal code.
-src/editor.rs   Key handling, scrolling, status and messages, quit confirmation.
-                Editor::view(width, height) returns a plain View value to draw.
-src/git.rs      Read-only `git` CLI wrapper behind a trait (status, diff, log).
-src/gitview.rs  Git view state: file list, selection, diff scroll, commit picker.
-src/text.rs     Shared text helpers (width fitting, truncation).
-src/filetree.rs Read-only file tree state: expansion, selection, rendering.
-src/app.rs      Owns the editor, git view and file tree; switches between them.
-src/screen.rs   Plain Screen value both modes render to.
+src/buffer.rs    Rope-backed text, cursor, load and atomic save. No terminal code.
+src/editor.rs    Key handling, scrolling, status and messages, quit confirmation.
+                 Editor::view(width, height) returns a plain View value to draw.
+src/git.rs       Read-only `git` CLI wrapper behind a trait (status, diff, log).
+src/gitview.rs   Git view state: file list, selection, diff scroll, commit picker.
+src/text.rs      Shared text helpers (width fitting, truncation).
+src/filetree.rs  Read-only file tree state: expansion, selection, rendering.
+src/app.rs       Owns the editor, git view and file tree; switches between them.
+src/screen.rs    Plain Screen value both modes render to.
 src/highlight.rs Rust tokenizer: classifies each char of a line (std only).
-src/main.rs     Thin crossterm layer: raw mode, read keys, draw the View,
-                restore the terminal on exit, error and panic.
+src/main.rs      Thin crossterm layer: raw mode, read keys, draw the View,
+                 restore the terminal on exit, error and panic.
 scripts/pty_smoke.py   Drives the release binary through a pseudo-terminal.
 ```
 
 Dependencies: `crossterm` (terminal input and output) and `ropey` (text storage). There is no `ratatui` on purpose; the editor draws its own screen.
 
-Design rule: all logic lives in the library (`buffer`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
+Design rule: all logic lives in the library (`buffer`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`, `screen`, `highlight`) so it can be tested without a terminal. `main.rs` only reads keys and prints.
 
 Known simplifications:
 - Columns count Rust `char`s, not display cells, so emoji and CJK characters misalign the cursor.

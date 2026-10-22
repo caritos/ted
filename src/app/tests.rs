@@ -41,6 +41,7 @@ impl Git for Shared {
 mod command;
 mod gutter;
 mod help;
+mod saveas;
 mod search;
 
 fn key(code: KeyCode) -> KeyEvent {

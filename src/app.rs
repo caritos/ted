@@ -331,6 +331,7 @@ impl App {
         };
         match command {
             Command::Save => self.editor_mut().save(),
+            Command::SaveAs(path) => self.save_as(&path),
             Command::Goto(n) => self.editor_mut().go_to_line(n),
             Command::Lines(setting) => self.line_numbers = setting.unwrap_or(!self.line_numbers),
             Command::Next => self.cycle(true),
@@ -351,6 +352,21 @@ impl App {
             }
         }
         Flow::Continue
+    }
+
+    /// `saveas`: writes the current buffer to a new file. Never overwrites an
+    /// existing path (a dangling symlink counts) and refuses a file that
+    /// another buffer has open.
+    fn save_as(&mut self, rel: &str) {
+        let path = self.location.join(rel);
+        let name = path.file_name().map_or_else(|| rel.to_string(), |n| n.to_string_lossy().into_owned());
+        if self.position_of(&path).is_some() {
+            self.editor_mut().set_message(format!("Already open: {name}"));
+        } else if std::fs::symlink_metadata(&path).is_ok() {
+            self.editor_mut().set_message(format!("Exists: {name}"));
+        } else {
+            self.editor_mut().save_as(path);
+        }
     }
 
     /// Refreshes the view that is showing; does nothing in the editor.

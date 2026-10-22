@@ -275,6 +275,40 @@ fn save_leaves_no_temp_files_behind() {
     assert_eq!(entries, 1);
 }
 
+#[test]
+fn save_as_writes_sets_the_path_and_clears_modified() {
+    let path = temp_path("save-as");
+    let mut b = typed("hi\nthere");
+    assert!(b.is_modified());
+    b.save_as(path.clone()).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "hi\nthere");
+    assert_eq!(b.path(), Some(path.as_path()));
+    assert!(!b.is_modified());
+}
+
+#[test]
+fn failed_save_as_keeps_the_old_path_and_modified_state() {
+    let path = temp_path("save-as-fail");
+    let missing = path.parent().unwrap().join("no-such-dir").join("x.txt");
+    let mut b = typed("hi");
+    assert!(b.save_as(missing.clone()).is_err());
+    assert_eq!(b.path(), None);
+    assert!(b.is_modified());
+    assert!(!missing.exists());
+    assert!(!missing.parent().unwrap().exists());
+}
+
+#[test]
+fn failed_save_as_on_a_named_buffer_keeps_its_path() {
+    let path = temp_path("save-as-named");
+    let mut b = Buffer::open(&path).unwrap();
+    b.insert_char('x');
+    let bad = path.parent().unwrap().join("no-such-dir").join("x.txt");
+    assert!(b.save_as(bad).is_err());
+    assert_eq!(b.path(), Some(path.as_path()));
+    assert!(b.is_modified());
+}
+
 /// Buffer of `lines` lines "aaaa", cursor at (`row`, `col`), dirty row drained.
 fn at(lines: usize, row: usize, col: usize) -> Buffer {
     let mut b = Buffer::from_text(&vec!["aaaa"; lines].join("\n"));

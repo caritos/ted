@@ -65,6 +65,15 @@ impl Buffer {
         Ok(())
     }
 
+    /// Writes the text to `path` (atomically). Only on success does the
+    /// buffer take the new path and become unmodified.
+    pub fn save_as(&mut self, path: PathBuf) -> io::Result<()> {
+        write_atomic(&path, &self.text())?;
+        self.path = Some(path);
+        self.modified = false;
+        Ok(())
+    }
+
     pub fn text(&self) -> String {
         self.rope.to_string()
     }

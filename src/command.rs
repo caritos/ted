@@ -2,13 +2,14 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 11] = [
-    "save", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "quit",
+pub const NAMES: [&str; 12] = [
+    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Save,
+    SaveAs(String),
     Goto(usize),
     Lines(Option<bool>),
     Next,
@@ -23,7 +24,7 @@ pub enum Command {
 }
 
 /// Names that take an argument; Tab adds a space after completing one.
-const TAKES_ARGUMENT: [&str; 2] = ["goto", "lines"];
+const TAKES_ARGUMENT: [&str; 3] = ["saveas", "goto", "lines"];
 
 /// Names starting with the (case-insensitive) word, in `NAMES` order.
 pub fn matches(word: &str) -> Vec<&'static str> {
@@ -93,6 +94,11 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "help" => plain(Command::Help),
         "quit" => plain(Command::Quit),
         "wq" => plain(Command::WriteQuit),
+        // The path keeps its case and inner spaces.
+        "saveas" => match input[first.len()..].trim() {
+            "" => Err("Usage: saveas <path>".to_string()),
+            path => Ok(Command::SaveAs(path.to_string())),
+        },
         "goto" => match args.as_slice() {
             [n] => match n.parse::<usize>() {
                 Ok(n) if n > 0 => Ok(Command::Goto(n)),
@@ -165,7 +171,7 @@ mod tests {
     #[test]
     fn unique_prefix_runs() {
         assert_eq!(parse("buf"), Ok(Command::Buffers));
-        assert_eq!(parse("s"), Ok(Command::Save));
+        assert_eq!(parse("sav"), Err("Ambiguous: save, saveas".to_string()));
         assert_eq!(parse("qu"), Ok(Command::Quit));
     }
 
@@ -212,5 +218,29 @@ mod tests {
         assert_eq!(complete("ZZZ"), "ZZZ");
         assert_eq!(complete("goto"), "goto ");
         assert_eq!(complete("bu"), "buffers");
+    }
+
+    #[test]
+    fn saveas_parses_with_its_path() {
+        assert_eq!(parse("saveas out.txt"), Ok(Command::SaveAs("out.txt".to_string())));
+        assert_eq!(parse("SaveAs  My File.TXT "), Ok(Command::SaveAs("My File.TXT".to_string())));
+        assert_eq!(err("saveas"), "Usage: saveas <path>");
+        assert_eq!(err("saveas   "), "Usage: saveas <path>");
+    }
+
+    #[test]
+    fn save_stays_exact_and_prefixes_of_both_are_ambiguous() {
+        assert_eq!(parse("save"), Ok(Command::Save));
+        assert_eq!(err("sa"), "Ambiguous: save, saveas");
+        assert_eq!(err("s"), "Ambiguous: save, saveas");
+        assert_eq!(parse("savea x"), Ok(Command::SaveAs("x".to_string())));
+        assert_eq!(matches("sa"), vec!["save", "saveas"]);
+    }
+
+    #[test]
+    fn complete_saveas_adds_a_space() {
+        assert_eq!(complete("savea"), "saveas ");
+        assert_eq!(complete("sa"), "save");
+        assert_eq!(complete("saveas"), "saveas ");
     }
 }

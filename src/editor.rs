@@ -489,6 +489,14 @@ impl Editor {
         }
     }
 
+    /// Saves under a new path; shows the result as the message.
+    pub fn save_as(&mut self, path: std::path::PathBuf) {
+        match self.buffer.save_as(path) {
+            Ok(()) => self.message = format!("Saved {} lines", self.buffer.line_count()),
+            Err(e) => self.message = format!("Save failed: {e}"),
+        }
+    }
+
     fn status_line(&self, width: usize) -> String {
         let name = self
             .buffer

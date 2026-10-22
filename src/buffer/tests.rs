@@ -358,3 +358,44 @@ fn take_dirty_row_returns_the_lowest_row_since_the_last_take() {
     b.insert_char('w');
     assert_eq!(b.take_dirty_row(), Some(4));
 }
+
+/// Asserts the cursor is on a real row and column, then moves it every way.
+fn assert_cursor_valid(b: &mut Buffer) {
+    let (row, col) = b.cursor();
+    assert!(row < b.line_count(), "row {row} of {}", b.line_count());
+    assert!(col <= b.line(row).chars().count(), "col {col} on row {row}");
+    b.move_right();
+    b.move_left();
+    b.move_down();
+    b.move_up();
+}
+
+#[test]
+fn enter_after_a_lone_cr_break_keeps_the_cursor_on_a_real_row() {
+    // The new \n joins the \r before it into one \r\n break (issue #2).
+    let mut b = Buffer::from_text("a\rb");
+    b.move_down();
+    b.insert_newline();
+    assert_eq!(b.text(), "a\r\nb");
+    assert_eq!(b.cursor(), (1, 0));
+    assert_cursor_valid(&mut b);
+}
+
+#[test]
+fn backspace_that_joins_a_cr_and_lf_keeps_the_cursor_valid() {
+    let mut b = Buffer::from_text("a\rx\nb");
+    b.move_down();
+    b.move_right();
+    b.backspace(); // removes x: "a\r\nb"
+    assert_eq!(b.text(), "a\r\nb");
+    assert_cursor_valid(&mut b);
+}
+
+#[test]
+fn delete_that_joins_a_cr_and_lf_keeps_the_cursor_valid() {
+    let mut b = Buffer::from_text("a\rx\nb");
+    b.move_down();
+    b.delete(); // removes x: "a\r\nb"
+    assert_eq!(b.text(), "a\r\nb");
+    assert_cursor_valid(&mut b);
+}

@@ -6,6 +6,8 @@ use crate::screen::Style;
 use crate::text::sanitize_char;
 
 const TAB_WIDTH: usize = 4;
+/// Page size before the first frame tells the editor the screen height.
+const DEFAULT_PAGE: usize = 20;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -34,6 +36,8 @@ pub struct Editor {
     tag: String,
     scroll_row: usize,
     scroll_col: usize,
+    /// Lines PageUp/PageDown move: one screenful less one, from the last frame.
+    page: usize,
     /// Highlight state at the start of each line (index = row), valid for
     /// every entry; extended lazily and truncated at the first edited row.
     line_states: Vec<LineState>,
@@ -52,6 +56,7 @@ impl Editor {
             tag: String::new(),
             scroll_row: 0,
             scroll_col: 0,
+            page: DEFAULT_PAGE,
             line_states: Vec::new(),
             highlighted: None,
             #[cfg(test)]
@@ -95,6 +100,10 @@ impl Editor {
             KeyCode::Right => self.buffer.move_right(),
             KeyCode::Up => self.buffer.move_up(),
             KeyCode::Down => self.buffer.move_down(),
+            KeyCode::Home => self.buffer.move_home(),
+            KeyCode::End => self.buffer.move_end(),
+            KeyCode::PageUp => self.buffer.move_up_by(self.page),
+            KeyCode::PageDown => self.buffer.move_down_by(self.page),
             _ => {}
         }
         Flow::Continue
@@ -105,6 +114,7 @@ impl Editor {
     pub fn view(&mut self, width: usize, height: usize) -> View {
         let text_rows = height.saturating_sub(2);
         let (row, col) = self.buffer.cursor();
+        self.page = text_rows.saturating_sub(1).max(1);
 
         if text_rows > 0 {
             if row < self.scroll_row {

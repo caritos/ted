@@ -59,6 +59,8 @@ Files ending in `.rs` are drawn with colors from the terminal's ANSI palette, so
 
 | Key | Action |
 |---|---|
+| Home / End | Start / end of the line |
+| PageUp / PageDown | Move the cursor one screenful up / down |
 | Arrow keys | Move the cursor. Left and Right wrap across line ends; Up and Down remember the column across short lines |
 | Printable keys | Insert text |
 | Enter | New line |
@@ -125,7 +127,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 288 unit tests
+cargo test                                   # 296 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
@@ -138,7 +140,7 @@ Verified by hand in a real terminal: save, quit, add text, delete text. Unit tes
 
 ## Not yet
 
-Home/End, PageUp/PageDown, undo, search, tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+undo, search, tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

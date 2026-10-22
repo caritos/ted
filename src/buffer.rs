@@ -118,10 +118,12 @@ impl Buffer {
     pub fn insert_newline(&mut self) {
         // Splitting a line: be conservative and include the row above.
         self.mark_dirty(self.row.saturating_sub(1));
-        self.rope.insert_char(self.cursor_index(), '\n');
-        self.row += 1;
-        self.col = 0;
-        self.goal_col = 0;
+        let index = self.cursor_index();
+        self.rope.insert_char(index, '\n');
+        // A \n inserted after a lone \r joins with it into one break, so the
+        // row cannot simply be incremented.
+        self.place_cursor(index + 1);
+        self.goal_col = self.col;
         self.modified = true;
     }
 
@@ -133,16 +135,14 @@ impl Buffer {
         if self.col > 0 {
             self.mark_dirty(self.row);
             self.rope.remove(index - 1..index);
-            self.col -= 1;
+            self.place_cursor(index - 1);
         } else {
             let prev = self.row - 1;
             // Joining with the line above: that row changes.
             self.mark_dirty(prev);
             let break_len = break_len(self.rope.line(prev));
-            let prev_len = self.line_len(prev);
             self.rope.remove(index - break_len..index);
-            self.row = prev;
-            self.col = prev_len;
+            self.place_cursor(index - break_len);
         }
         self.goal_col = self.col;
         self.modified = true;
@@ -162,6 +162,7 @@ impl Buffer {
             index + break_len(self.rope.line(self.row))
         };
         self.rope.remove(index..end);
+        self.place_cursor(index);
         self.modified = true;
     }
 
@@ -197,6 +198,36 @@ impl Buffer {
             self.row += 1;
             self.col = self.goal_col.min(self.line_len(self.row));
         }
+    }
+
+    /// Puts the cursor at char `index`, whatever the edit did to the line
+    /// breaks around it (a \r and \n made adjacent by an edit become one break).
+    fn place_cursor(&mut self, index: usize) {
+        let index = index.min(self.rope.len_chars());
+        self.row = self.rope.char_to_line(index);
+        self.col = (index - self.rope.line_to_char(self.row)).min(self.line_len(self.row));
+    }
+
+    pub fn move_home(&mut self) {
+        self.col = 0;
+        self.goal_col = 0;
+    }
+
+    pub fn move_end(&mut self) {
+        self.col = self.line_len(self.row);
+        self.goal_col = self.col;
+    }
+
+    /// Moves up `rows` lines (stopping at the first), keeping the goal column.
+    pub fn move_up_by(&mut self, rows: usize) {
+        self.row = self.row.saturating_sub(rows);
+        self.col = self.goal_col.min(self.line_len(self.row));
+    }
+
+    /// Moves down `rows` lines (stopping at the last), keeping the goal column.
+    pub fn move_down_by(&mut self, rows: usize) {
+        self.row = (self.row + rows).min(self.line_count() - 1);
+        self.col = self.goal_col.min(self.line_len(self.row));
     }
 
     fn cursor_index(&self) -> usize {

@@ -42,7 +42,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Done (unit-tested + pty smoke): open/edit/save file, arrows, Backspace/Delete/Enter/Tab(4 spaces), Ctrl-S, Ctrl-Q with unsaved-changes confirm, scrolling, status bar.
 - Confirmed by hand in a real terminal (2026-10-22): save, quit, add text, delete text.
 - Not yet verified by hand: look and feel, resize, Option/Alt keys, unsaved-changes quit warning.
-- Deferred: Home/End, PageUp/Down, undo, search, save-as prompt for unnamed buffers, wide-char (CJK/emoji) cursor alignment, syntax highlighting.
+- Deferred: undo, search, save-as prompt for unnamed buffers, wide-char (CJK/emoji) cursor alignment, syntax highlighting.
 - History: an earlier SwiftUI Mac app attempt lives at git tag `swift-mac-app`.
 - Environment: Homebrew rustup is keg-only; `~/src/config/zsh/zshenv` now adds it and `~/.cargo/bin` to PATH (change is uncommitted in the config repo). See README.md for user-facing docs.
 ### 2026-10-22 (git changes view)
@@ -65,3 +65,8 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Note: ropey treats a lone `\r` (and VT, FF, NEL, U+2028/9) as a line break, so those never reach a row; they are kept as-is on save.
 - Not yet verified by hand: any of the above in a real terminal.
 - Deferred: proper tab expansion so tabs align to tab stops (a tab currently shows as one space); other invisible/bidi Unicode (e.g. U+202E) is shown as-is.
+
+### 2026-10-22 (cursor fixes: lone-CR panic, Home/End, PageUp/PageDown)
+- Done (unit-tested, 296 tests in total): issue #2 fixed: after Enter, Backspace or Delete the cursor is re-placed from its char index (`Buffer::place_cursor`), so a `\n` that joins a lone `\r` into one break no longer leaves it past the last row. Editor Home/End and PageUp/PageDown (one screenful less one, from the last frame; 20 before the first frame; goal column kept).
+- Done (pty smoke, 3 new checks): two PageDowns on a 200-line file show `line 40`, PageUp goes back; seen failing on the previous installed binary.
+- Not yet verified by hand: PageUp/PageDown and Home/End feel in a real terminal. The randomized mixed-break test I tried passed on the old code too, so it was dropped; only the deterministic regression tests remain.

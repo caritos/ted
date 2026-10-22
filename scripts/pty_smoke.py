@@ -399,6 +399,43 @@ finally:
             pass
     shutil.rmtree(bufs, ignore_errors=True)
 
+# 14. PageDown / PageUp move the editor cursor a screenful at a time.
+pg = tempfile.mkdtemp(prefix="ted-smoke-page-")
+pid = fd = None
+try:
+    p = os.path.join(pg, "long.txt")
+    with open(p, "w") as f:
+        f.write("".join("line %d\n" % i for i in range(200)))
+    pid, fd = spawn([p])
+    drain(fd)
+    send(fd, b"\x1b[6~")
+    send(fd, b"\x1b[6~")
+    out = drain(fd, 0.5, 2.0)
+    check("page: two PageDowns scroll to line 40", b"line 40" in out, out[-300:])
+    for _ in range(4):
+        send(fd, b"\x1b[5~")
+    out = drain(fd, 0.5, 2.0)
+    check("page: PageUp goes back to the top", b"line 0" in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("page: session exits 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(pg, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

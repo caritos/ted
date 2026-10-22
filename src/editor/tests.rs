@@ -630,3 +630,69 @@ fn set_tag_appears_after_name_and_marker_sanitized_and_clipped() {
     e.set_tag(String::new());
     assert!(!e.view(30, 5).status.contains("[2/3]"));
 }
+
+fn numbered(n: usize) -> Editor {
+    let text: Vec<String> = (0..n).map(|i| format!("line {i}")).collect();
+    Editor::new(Buffer::from_text(&text.join("\n")))
+}
+
+#[test]
+fn page_down_moves_one_screenful_and_scrolls_with_it() {
+    let mut e = numbered(100);
+    e.view(20, 12); // 10 text rows
+    e.handle_key(key(KeyCode::PageDown));
+    assert_eq!(e.buffer().cursor().0, 9);
+    let v = e.view(20, 12);
+    assert!(v.lines[v.cursor.0].starts_with("line 9"));
+    e.handle_key(key(KeyCode::PageDown));
+    assert_eq!(e.buffer().cursor().0, 18);
+}
+
+#[test]
+fn page_up_moves_back_and_stops_at_the_first_line() {
+    let mut e = numbered(100);
+    e.view(20, 12);
+    press(&mut e, KeyCode::PageDown, 3);
+    assert_eq!(e.buffer().cursor().0, 27);
+    e.handle_key(key(KeyCode::PageUp));
+    assert_eq!(e.buffer().cursor().0, 18);
+    press(&mut e, KeyCode::PageUp, 5);
+    assert_eq!(e.buffer().cursor().0, 0);
+}
+
+#[test]
+fn page_down_stops_at_the_last_line_and_keeps_the_goal_column() {
+    let mut e = Editor::new(Buffer::from_text("abcdef\nab\nabcdef\nab"));
+    e.view(20, 12);
+    press(&mut e, KeyCode::Right, 5);
+    e.handle_key(key(KeyCode::PageDown));
+    assert_eq!(e.buffer().cursor(), (3, 2)); // last line is short
+    e.handle_key(key(KeyCode::PageUp));
+    assert_eq!(e.buffer().cursor(), (0, 5)); // goal column remembered
+}
+
+#[test]
+fn paging_works_before_the_first_frame_and_in_tiny_terminals() {
+    let mut e = numbered(50);
+    e.handle_key(key(KeyCode::PageDown)); // no view() yet
+    assert!(e.buffer().cursor().0 >= 1);
+    for h in 0..4 {
+        e.view(5, h);
+        e.handle_key(key(KeyCode::PageDown));
+        e.handle_key(key(KeyCode::PageUp));
+        e.view(5, h);
+    }
+}
+
+#[test]
+fn home_and_end_go_to_the_line_ends() {
+    let mut e = Editor::new(Buffer::from_text("hello\nworld"));
+    e.handle_key(key(KeyCode::End));
+    assert_eq!(e.buffer().cursor(), (0, 5));
+    e.handle_key(key(KeyCode::Home));
+    assert_eq!(e.buffer().cursor(), (0, 0));
+    e.handle_key(key(KeyCode::Down));
+    e.handle_key(key(KeyCode::End));
+    e.handle_key(key(KeyCode::Up)); // goal column is the end of "world"
+    assert_eq!(e.buffer().cursor(), (0, 5));
+}

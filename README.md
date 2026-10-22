@@ -32,12 +32,13 @@ Press Ctrl-G in the editor to open a read-only git view: changed files on the le
 | `r` | Reset the baseline to the current `HEAD` |
 | `b` | Pick a recent commit as the baseline (Enter picks, Esc closes) |
 | `q` / Esc / Ctrl-G | Back to the editor (closes the commit picker first if open) |
+| Ctrl-T | Jump to the file tree (closes the commit picker) |
 
 The git view only reads: it never stages, commits or changes the repo or working tree.
 
 ## File tree
 
-Press Ctrl-T in the editor to open a read-only file tree rooted at the directory `ted` was started in (for `ted <file>`, the file's parent). Directories come first, then files, each sorted case-insensitively. Dotfiles are shown; `.git` is hidden. It refreshes about once a second while showing. A directory that cannot be read shows a dim `(cannot read)` row and a message. The tree only reads: it never creates, renames or deletes anything.
+Press Ctrl-T in the editor to open a read-only file tree rooted at the same directory the git view looks at: the current directory for `ted` alone, `<dir>` for `ted <dir>`, and the file's parent for `ted <file>`. The status row shows that directory's name. Directories come first, then files, each sorted case-insensitively. Dotfiles are shown; `.git` is hidden. It refreshes about once a second while showing. A directory that cannot be read shows a dim `(cannot read)` row and a message. The tree only reads: it never creates, renames or deletes anything.
 
 | Key (file tree) | Action |
 |---|---|
@@ -46,7 +47,7 @@ Press Ctrl-T in the editor to open a read-only file tree rooted at the directory
 | Home / End | First / last row |
 | Right | Expand a directory (on an expanded one, move to its first child) |
 | Left | Collapse a directory (on a file or collapsed one, select the parent) |
-| Enter | Toggle a directory; open a file in the editor |
+| Enter | Toggle a directory; open a file in the editor (refused with a message for unsaved changes, a FIFO, socket or device, or a file over 64 MiB) |
 | `q` / Esc / Ctrl-T | Back to the editor |
 | Ctrl-G | Jump to the changes view (and Ctrl-T in that view jumps to the tree) |
 

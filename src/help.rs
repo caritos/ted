@@ -26,6 +26,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Tab", "Insert 4 spaces"),
             ("Backspace / Delete", "Delete before / under the cursor"),
             ("Ctrl-S", "Save the current buffer"),
+            ("Ctrl-Z / Ctrl-Y", "Undo / redo"),
             ("Ctrl-F", "Find text"),
             ("Ctrl-X", "Command prompt (Tab completes)"),
             ("F3", "Find the next match"),
@@ -191,7 +192,7 @@ mod tests {
     fn table_lists_every_documented_key() {
         let keys: Vec<&str> = HELP.iter().flat_map(|(_, rows)| rows.iter().flat_map(|(k, _)| k.split(" / "))).collect();
         for name in [
-            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "Ctrl-X", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
+            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "Ctrl-X", "Ctrl-Z", "Ctrl-Y", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
             "Backspace", "Delete", "Enter", "F1", "F2", "Up", "Down", "Left", "Right", "Esc", "r", "b", "q",
         ] {
             assert!(keys.contains(&name), "help table lacks {name}");

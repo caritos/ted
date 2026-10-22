@@ -341,6 +341,8 @@ impl App {
             Command::Tree => self.enter_file_tree(),
             Command::Git => self.enter_git_view(now),
             Command::Help => self.enter_help(),
+            Command::Undo => self.editor_mut().undo(),
+            Command::Redo => self.editor_mut().redo(),
             Command::Quit => return self.quit(),
             Command::WriteQuit => {
                 self.editor_mut().save();
@@ -463,10 +465,12 @@ impl App {
             self.current = i;
             self.mode = Mode::Editor;
             // A buffer with edits keeps them and is not read again. An
-            // unedited one is refreshed from disk; if that fails the old
-            // copy stays and the error shows in the editor.
+            // unedited one is refreshed from disk, unless the disk text is
+            // what it already holds (history and cursor stay); if the read
+            // fails the old copy stays and the error shows in the editor.
             if !self.editors[i].buffer().is_modified() {
                 match self.load(&path) {
+                    Ok(buffer) if buffer.text() == self.editors[i].buffer().text() => {}
                     Ok(buffer) => self.editors[i] = Editor::new(buffer),
                     Err(message) => self.editors[i].set_message(message),
                 }
@@ -493,6 +497,8 @@ impl App {
         let pristine = self.editors.len() == 1
             && only.buffer().path().is_none()
             && !only.buffer().is_modified()
+            && !only.buffer().can_undo()
+            && !only.buffer().can_redo()
             && only.buffer().text().is_empty();
         if pristine {
             self.editors[0] = Editor::new(buffer);

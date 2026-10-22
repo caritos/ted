@@ -316,6 +316,8 @@ impl Editor {
             KeyCode::Char('f') if ctrl => self.open_prompt(PromptKind::Find),
             KeyCode::Char('l') if ctrl => self.open_prompt(PromptKind::Goto),
             KeyCode::Char('x') if ctrl => self.open_prompt(PromptKind::Command),
+            KeyCode::Char('z') if ctrl => self.undo(),
+            KeyCode::Char('y') if ctrl => self.redo(),
             KeyCode::F(3) => self.find_again(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline(),
@@ -483,6 +485,20 @@ impl Editor {
         self.buffer.go_to_line(n);
     }
 
+    /// Undoes the last edit step; says so when there is nothing to undo.
+    pub fn undo(&mut self) {
+        if !self.buffer.undo() {
+            self.message = "Nothing to undo".to_string();
+        }
+    }
+
+    /// Redoes the last undone step; says so when there is nothing to redo.
+    pub fn redo(&mut self) {
+        if !self.buffer.redo() {
+            self.message = "Nothing to redo".to_string();
+        }
+    }
+
     pub fn save(&mut self) {
         if self.buffer.path().is_none() {
             self.message = "No file name: start ted with a path to save.".to_string();
@@ -568,3 +584,5 @@ mod prompt_tests;
 mod tab_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod undo_tests;

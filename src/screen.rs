@@ -8,6 +8,7 @@ pub enum Style {
     Removed,
     Hunk,
     Dim,
+    Dir,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

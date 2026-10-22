@@ -7,6 +7,9 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::screen::{Row, Screen, Span, Style};
+use crate::text::{clip, pad, window_start};
+
 /// Rows moved by PageUp / PageDown.
 const PAGE: usize = 10;
 
@@ -253,6 +256,72 @@ impl FileTree {
         self.listings.retain(|p, _| p != path && !p.starts_with(&prefix));
         if self.selected.as_deref().is_some_and(|s| s.starts_with(&prefix)) {
             self.selected = Some(path.to_string());
+        }
+    }
+
+    /// Draw the tree into `height` rows: a body of `height - 2` rows, then
+    /// the status row and the message row.
+    pub fn render(&self, width: usize, height: usize) -> Screen {
+        let body_h = height.saturating_sub(2);
+        let visible = self.visible();
+        let selected = self.selected_row(&visible);
+
+        // Display lines (text and style), and the line holding the selection.
+        let mut lines: Vec<(String, Style)> = Vec::new();
+        let mut selected_line = 0;
+        for (i, row) in visible.iter().enumerate() {
+            let indent = "  ".repeat(row.depth);
+            let text = match row.kind {
+                NodeKind::Dir => {
+                    let marker = if row.expanded { "v " } else { "> " };
+                    format!("{indent}{marker}{}/", row.name)
+                }
+                NodeKind::File => format!("{indent}  {}", row.name),
+            };
+            let style = if selected == Some(i) {
+                selected_line = lines.len();
+                Style::Selected
+            } else if row.kind == NodeKind::Dir {
+                Style::Dir
+            } else {
+                Style::Normal
+            };
+            lines.push((text, style));
+            if row.unreadable {
+                lines.push((format!("{indent}    (cannot read)"), Style::Dim));
+            }
+        }
+
+        let first = window_start(selected_line, body_h);
+        let mut rows: Vec<Row> = lines
+            .into_iter()
+            .skip(first)
+            .take(body_h)
+            .map(|(text, style)| {
+                // Padded so the selection bar spans the row.
+                let text =
+                    if style == Style::Selected { pad(&text, width) } else { clip(&text, width) };
+                vec![Span { text, style }]
+            })
+            .collect();
+        rows.resize_with(body_h, Vec::new);
+
+        let (status, message) = if height >= 2 {
+            (pad(&self.status_text(&visible), width), clip(&self.message, width))
+        } else {
+            (String::new(), String::new())
+        };
+        Screen { rows, status, message, cursor: None }
+    }
+
+    fn status_text(&self, visible: &[VisibleRow]) -> String {
+        let name = self.display_name("");
+        if self.listings.get("").is_some_and(|l| l.error.is_some()) {
+            format!("Files: {name}  Error")
+        } else if visible.is_empty() {
+            format!("Files: {name}  (empty)")
+        } else {
+            format!("Files: {name}  {} entries visible", visible.len())
         }
     }
 

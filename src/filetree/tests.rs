@@ -1,4 +1,5 @@
 use super::*;
+use crate::screen::{Row, Screen, Style};
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;
@@ -404,4 +405,144 @@ fn set_message_replaces_the_message_and_the_next_key_clears_it() {
     assert_eq!(t.message(), "hello");
     t.handle_key(key(KeyCode::Down));
     assert_eq!(t.message(), "");
+}
+
+// ---- render ----
+
+fn row_text(r: &Row) -> String {
+    r.iter().map(|s| s.text.as_str()).collect()
+}
+
+fn texts(s: &Screen) -> Vec<String> {
+    s.rows.iter().map(row_text).collect()
+}
+
+fn root_name(t: &FileTree) -> String {
+    t.display_name("")
+}
+
+#[test]
+fn render_shows_indent_markers_names_and_trailing_slash_for_directories() {
+    let d = Temp::new("r-layout");
+    d.file("src/main.rs");
+    d.dir("empty");
+    d.file("a.txt");
+    let mut t = d.tree();
+    press(&mut t, &[KeyCode::Down, KeyCode::Right]); // expand src
+    let s = t.render(40, 10);
+    let rows: Vec<String> = texts(&s).iter().take(4).map(|r| r.trim_end().to_string()).collect();
+    assert_eq!(rows, vec!["> empty/", "v src/", "    main.rs", "  a.txt"]);
+}
+
+#[test]
+fn render_styles_directories_selection_and_unreadable_marker() {
+    let d = Temp::new("r-style");
+    d.dir("locked");
+    d.file("a.txt");
+    fs::set_permissions(d.0.join("locked"), fs::Permissions::from_mode(0o000)).unwrap();
+    let mut t = d.tree();
+    press(&mut t, &[KeyCode::Right]); // expand locked (fails)
+    press(&mut t, &[KeyCode::Down]); // locked -> a.txt
+    let s = t.render(30, 10);
+    assert_eq!(texts(&s)[0].trim_end(), "v locked/");
+    assert_eq!(s.rows[0][0].style, Style::Dir);
+    assert_eq!(texts(&s)[1].trim_end(), "    (cannot read)");
+    assert_eq!(s.rows[1][0].style, Style::Dim);
+    assert_eq!(texts(&s)[2].trim_end(), "  a.txt");
+    assert_eq!(s.rows[2][0].style, Style::Selected);
+    // A selected directory is Selected, not Dir.
+    let t2 = d.tree();
+    assert_eq!(t2.render(30, 10).rows[0][0].style, Style::Selected);
+}
+
+#[test]
+fn render_selected_row_is_padded_to_full_width() {
+    let d = Temp::new("r-pad");
+    d.file("a.txt");
+    let s = d.tree().render(20, 5);
+    assert_eq!(s.rows[0][0].text.chars().count(), 20);
+    assert_eq!(s.rows[0][0].style, Style::Selected);
+}
+
+#[test]
+fn render_status_is_exactly_width_and_shows_root_name_and_count() {
+    let d = Temp::new("r-status");
+    d.file("a.txt");
+    d.file("b.txt");
+    let t = d.tree();
+    let want = format!("Files: {}  2 entries visible", root_name(&t));
+    for w in [want.chars().count(), want.chars().count() + 7, 12] {
+        let s = t.render(w, 6);
+        assert_eq!(s.status.chars().count(), w);
+        assert_eq!(s.status.trim_end(), want.chars().take(w).collect::<String>().trim_end());
+    }
+    assert!(t.render(200, 6).cursor.is_none());
+}
+
+#[test]
+fn render_empty_and_unreadable_root_states() {
+    let d = Temp::new("r-empty");
+    let t = d.tree();
+    let s = t.render(60, 6);
+    assert_eq!(s.status.trim_end(), format!("Files: {}  (empty)", root_name(&t)));
+    assert!(texts(&s).iter().all(|r| r.trim().is_empty()));
+
+    let gone = FileTree::new(d.0.join("does-not-exist"));
+    let s = gone.render(60, 6);
+    assert_eq!(s.status.trim_end(), "Files: does-not-exist  Error");
+    assert_eq!(s.message, gone.message().chars().take(60).collect::<String>());
+    assert!(s.message.starts_with("Cannot read"));
+}
+
+#[test]
+fn render_sanitizes_escape_and_control_characters_in_names() {
+    let d = Temp::new("r-san");
+    d.file("a\x1b[31mb\rc");
+    let mut t = d.tree();
+    t.set_message("bad\x1b[0m".to_string());
+    let s = t.render(40, 6);
+    let all = format!("{}{}{}", texts(&s).join(""), s.status, s.message);
+    assert!(!all.contains('\x1b') && !all.contains('\r'));
+    assert!(texts(&s)[0].contains("a?[31mb?c"));
+}
+
+#[test]
+fn render_keeps_selection_visible_in_a_long_listing() {
+    let d = Temp::new("r-long");
+    for i in 0..30 {
+        d.file(&format!("f{i:02}.txt"));
+    }
+    let mut t = d.tree();
+    press(&mut t, &[KeyCode::End]);
+    let s = t.render(30, 7); // 5 body rows
+    assert_eq!(s.rows.len(), 5);
+    assert!(texts(&s)[4].starts_with("  f29.txt"));
+    assert_eq!(s.rows[4][0].style, Style::Selected);
+    press(&mut t, &[KeyCode::Home]);
+    assert!(texts(&t.render(30, 7))[0].starts_with("  f00.txt"));
+}
+
+#[test]
+fn render_never_exceeds_width_or_height() {
+    let d = Temp::new("r-bounds");
+    d.file("one/two/three/deep.txt");
+    d.file("one/ünïcödé-名前.txt");
+    d.file("z.txt");
+    let mut t = d.tree();
+    press(&mut t, &[KeyCode::Right, KeyCode::Down, KeyCode::Right, KeyCode::Down, KeyCode::Right]);
+    for w in 0..=40 {
+        for h in 0..=8 {
+            let s = t.render(w, h);
+            assert_eq!(s.rows.len(), h.saturating_sub(2));
+            for r in &s.rows {
+                assert!(row_text(r).chars().count() <= w, "w={w} h={h}");
+            }
+            assert!(s.message.chars().count() <= w);
+            if h >= 2 {
+                assert_eq!(s.status.chars().count(), w);
+            } else {
+                assert!(s.status.is_empty() && s.message.is_empty());
+            }
+        }
+    }
 }

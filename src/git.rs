@@ -1,4 +1,7 @@
 use std::fmt;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::SystemTime;
 
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -134,6 +137,143 @@ pub fn format_age(secs: u64) -> String {
         60..=3599 => format!("{}m", secs / 60),
         3600..=86399 => format!("{}h", secs / 3600),
         _ => format!("{}d", secs / 86400),
+    }
+}
+
+pub const MAX_DIFF_BYTES: usize = 200_000;
+
+pub trait Git {
+    /// Current HEAD; `Baseline::Empty` when the repo has no commits.
+    fn head(&self) -> Result<Baseline, GitError>;
+    fn baseline_exists(&self, base: &Baseline) -> bool;
+    /// Tracked changes since `base` plus untracked files, scoped to the
+    /// location with paths relative to it. No ordering guarantee.
+    fn changes(&self, base: &Baseline) -> Result<Vec<Change>, GitError>;
+    /// Unified diff text, capped at `MAX_DIFF_BYTES`.
+    fn diff(&self, base: &Baseline, change: &Change) -> Result<String, GitError>;
+    fn log(&self, limit: usize) -> Result<Vec<Commit>, GitError>;
+    /// Mtime of the working-tree file, `None` if it does not exist.
+    fn modified(&self, path: &str) -> Option<SystemTime>;
+}
+
+pub struct GitCli {
+    dir: PathBuf,
+}
+
+impl GitCli {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        GitCli { dir: dir.into() }
+    }
+
+    /// Run a read-only git command in `dir`. Exit codes listed in `ok_codes`
+    /// besides 0 count as success.
+    fn run(&self, args: &[&str], ok_codes: &[i32]) -> Result<Vec<u8>, GitError> {
+        let out = Command::new("git")
+            .arg("--literal-pathspecs")
+            .arg("-C")
+            .arg(&self.dir)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+            .map_err(|e| GitError::Failed(format!("could not run git: {e}")))?;
+        let code = out.status.code();
+        if out.status.success() || code.is_some_and(|c| ok_codes.contains(&c)) {
+            return Ok(out.stdout);
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if stderr.contains("not a git repository") {
+            return Err(GitError::NotARepo);
+        }
+        let msg = stderr.trim();
+        Err(GitError::Failed(if msg.is_empty() {
+            format!("git {} failed", args.first().copied().unwrap_or(""))
+        } else {
+            msg.to_string()
+        }))
+    }
+
+    fn run_text(&self, args: &[&str], ok_codes: &[i32]) -> Result<String, GitError> {
+        Ok(String::from_utf8_lossy(&self.run(args, ok_codes)?).into_owned())
+    }
+}
+
+impl Git for GitCli {
+    fn head(&self) -> Result<Baseline, GitError> {
+        self.run(&["rev-parse", "--git-dir"], &[])?;
+        match self.run_text(&["rev-parse", "--verify", "--quiet", "HEAD"], &[]) {
+            Ok(hash) => Ok(Baseline::Commit(hash.trim().to_string())),
+            Err(GitError::NotARepo) => Err(GitError::NotARepo),
+            // A repo with no commits has no HEAD to resolve.
+            Err(GitError::Failed(_)) => Ok(Baseline::Empty),
+        }
+    }
+
+    fn baseline_exists(&self, base: &Baseline) -> bool {
+        match base {
+            Baseline::Empty => true,
+            Baseline::Commit(hash) => {
+                let spec = format!("{hash}^{{commit}}");
+                self.run(&["cat-file", "-e", &spec], &[]).is_ok()
+            }
+        }
+    }
+
+    fn changes(&self, base: &Baseline) -> Result<Vec<Change>, GitError> {
+        // Outside a repo `git diff` silently falls back to --no-index mode.
+        self.run(&["rev-parse", "--git-dir"], &[])?;
+        let tracked = self.run_text(
+            &["diff", "--name-status", "-z", "--no-renames", "--relative", base.rev(), "--", "."],
+            &[],
+        )?;
+        let untracked = self.run_text(&["ls-files", "--others", "--exclude-standard", "-z"], &[])?;
+        let mut changes = parse_name_status_z(&tracked);
+        for change in parse_untracked_z(&untracked) {
+            if !changes.iter().any(|c| c.path == change.path) {
+                changes.push(change);
+            }
+        }
+        Ok(changes)
+    }
+
+    fn diff(&self, base: &Baseline, change: &Change) -> Result<String, GitError> {
+        let bytes = if change.kind == ChangeKind::Untracked {
+            // --no-index exits 1 when the files differ.
+            self.run(&["diff", "--no-color", "--no-index", "--", "/dev/null", &change.path], &[1])?
+        } else {
+            self.run(
+                &["diff", "--no-color", "--no-renames", "--relative", base.rev(), "--", &change.path],
+                &[],
+            )?
+        };
+        let mut text = String::from_utf8_lossy(&bytes).into_owned();
+        if text.len() > MAX_DIFF_BYTES {
+            let mut cut = MAX_DIFF_BYTES;
+            while !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            text.truncate(cut);
+            if let Some(nl) = text.rfind('\n') {
+                text.truncate(nl + 1);
+            }
+            text.push_str("... diff truncated");
+        }
+        Ok(text)
+    }
+
+    fn log(&self, limit: usize) -> Result<Vec<Commit>, GitError> {
+        if self.head()? == Baseline::Empty {
+            return Ok(Vec::new());
+        }
+        let n = limit.to_string();
+        let out = self.run_text(
+            &["log", "-n", &n, "--date=unix", "--format=%H%x09%h%x09%ct%x09%D%x09%s"],
+            &[],
+        )?;
+        Ok(parse_log(&out))
+    }
+
+    fn modified(&self, path: &str) -> Option<SystemTime> {
+        std::fs::metadata(self.dir.join(path)).ok()?.modified().ok()
     }
 }
 

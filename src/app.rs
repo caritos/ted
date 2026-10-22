@@ -1,6 +1,6 @@
 //! The editor plus the git view and the file tree, and which one is showing.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -360,9 +360,10 @@ impl App {
     fn save_as(&mut self, rel: &str) {
         let path = self.location.join(rel);
         let name = path.file_name().map_or_else(|| rel.to_string(), |n| n.to_string_lossy().into_owned());
-        if self.position_of(&path).is_some() {
+        let open_at = self.position_of(&path);
+        if open_at.is_some_and(|i| i != self.current) {
             self.editor_mut().set_message(format!("Already open: {name}"));
-        } else if std::fs::symlink_metadata(&path).is_ok() {
+        } else if open_at.is_some() || std::fs::symlink_metadata(&path).is_ok() {
             self.editor_mut().set_message(format!("Exists: {name}"));
         } else {
             self.editor_mut().save_as(path);
@@ -531,12 +532,32 @@ fn entry(editor: &Editor) -> (String, bool) {
     (name, buffer.is_modified())
 }
 
-/// Whether two paths name the same file: canonical forms when both resolve,
-/// else the paths as given.
+/// Whether two paths name the same file (which need not exist yet).
 fn same_file(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
+    resolve(a) == resolve(b)
+}
+
+/// The canonical path; for a file that does not exist, the canonical parent
+/// plus the file name, or failing that the absolute path with `.` and `..`
+/// folded away lexically.
+fn resolve(path: &Path) -> PathBuf {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical;
+    }
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut folded = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                folded.pop();
+            }
+            other => folded.push(other),
+        }
+    }
+    match (folded.parent(), folded.file_name()) {
+        (Some(parent), Some(name)) => std::fs::canonicalize(parent).map_or(folded.clone(), |p| p.join(name)),
+        _ => folded,
     }
 }
 

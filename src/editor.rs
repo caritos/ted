@@ -245,8 +245,12 @@ impl Editor {
                 PromptKind::Command => prompt.text.push(c),
             },
             KeyCode::Tab if prompt.kind == PromptKind::Command => {
-                if !prompt.text.contains(char::is_whitespace) {
-                    prompt.text = command::complete(&prompt.text);
+                let word = prompt.text.trim_start();
+                if !word.contains(char::is_whitespace) {
+                    let lead = prompt.text.len() - word.len();
+                    let done = command::complete(word);
+                    prompt.text.truncate(lead);
+                    prompt.text.push_str(&done);
                 }
             }
             KeyCode::Char('f') if ctrl && find => self.step(&mut prompt, true),
@@ -280,8 +284,9 @@ impl Editor {
             PromptKind::Goto => format!("Go to line: {}_", prompt.text),
             PromptKind::Command => {
                 let mut line = format!("Command: {}_", prompt.text);
-                if !prompt.text.contains(char::is_whitespace) {
-                    let found = command::matches(&prompt.text);
+                let word = prompt.text.trim_start();
+                if !word.contains(char::is_whitespace) {
+                    let found = command::matches(word);
                     if !found.is_empty() {
                         line.push_str("  ");
                         line.push_str(&found.join(" "));

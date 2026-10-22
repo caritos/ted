@@ -111,3 +111,58 @@ fn hostile_name_is_drawn_sanitized() {
     assert!(!screen.message.contains('\u{1b}'), "{:?}", screen.message);
     assert!(screen.status.contains("a?[2Jb.txt"), "{:?}", screen.status);
 }
+
+#[test]
+fn refuses_a_missing_file_another_buffer_is_named_after() {
+    let dir = Temp::new("saveas-missing-open");
+    dir.file("b.txt", "beta\n");
+    let notes = dir.0.join("notes.txt");
+    let mut buffer = Buffer::open(&notes).unwrap();
+    buffer.insert_char('x');
+    let mut app = app_with(Editor::new(buffer), dir.0.clone(), one_file());
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 2);
+    for typed in ["saveas notes.txt", "saveas ./notes.txt", "saveas sub/../notes.txt"] {
+        run(&mut app, typed);
+        assert_eq!(msg(&mut app), "Already open: notes.txt", "{typed}");
+    }
+    assert!(!notes.exists());
+}
+
+#[test]
+fn a_buffer_opened_by_a_relative_missing_path_is_found() {
+    let dir = Temp::new("saveas-relative-open");
+    dir.file("b.txt", "beta\n");
+    // Relative to the process directory; the file does not exist.
+    let name = format!("ted-rel-{}-missing.txt", std::process::id());
+    let mut buffer = Buffer::open(Path::new(&name)).unwrap();
+    buffer.insert_char('x');
+    let cwd = std::env::current_dir().unwrap();
+    let mut app = app_with(Editor::new(buffer), cwd, one_file());
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ch('q'), t(1000));
+    // A second, unnamed buffer cannot be made without the tree, so name the
+    // other side through `open`-style reuse: saveas from this buffer onto
+    // `./name` is its own file.
+    run(&mut app, &format!("saveas ./{name}"));
+    assert_eq!(msg(&mut app), format!("Exists: {name}"));
+    assert!(!Path::new(&name).exists());
+}
+
+#[test]
+fn saveas_onto_the_buffers_own_file_says_exists() {
+    let dir = Temp::new("saveas-own");
+    let mut app = multi_app(&dir);
+    run(&mut app, "saveas a.txt");
+    assert_eq!(msg(&mut app), "Exists: a.txt");
+    assert_eq!(fs::read_to_string(dir.0.join("a.txt")).unwrap(), "alpha\nsecond\n");
+}
+
+#[test]
+fn goto_with_an_overflowing_number_goes_to_the_last_line() {
+    let mut app = text_app("one\ntwo\nthree", FakeGit::new());
+    run(&mut app, "goto 99999999999999999999999999");
+    assert_eq!(app.editor().buffer().cursor(), (2, 0));
+    run(&mut app, "goto -1");
+    assert_eq!(msg(&mut app), "Usage: goto <line>");
+}

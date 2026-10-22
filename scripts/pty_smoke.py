@@ -655,7 +655,7 @@ try:
     check("command: Ctrl-X shows the prompt", b"Command: " in out, out[-300:])
     send(fd, b"lines\r")
     out = plain(drain(fd)).split(b"\x1b[?25l")[-1]
-    check("command: `lines` hides the gutter (text kept)", b"line 0" in out and b"  1 line 0" not in out and b" 12 line 11" not in out, out[-300:])
+    check("command: `lines` hides the gutter (text kept)", b"\x1b[1;1Hline 0" in out and b"  1 line 0" not in out and b" 12 line 11" not in out, out[-300:])
     send(fd, CTRL_X)
     drain(fd)
     send(fd, b"lines\r")

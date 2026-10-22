@@ -299,6 +299,43 @@ fn failed_save_as_keeps_the_old_path_and_modified_state() {
 }
 
 #[test]
+fn save_as_never_replaces_an_existing_file() {
+    let path = temp_path("save-as-exists");
+    fs::write(&path, "keep").unwrap();
+    let mut b = typed("new");
+    let err = b.save_as(path.clone()).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "keep");
+    assert_eq!(b.path(), None);
+    assert!(b.is_modified());
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+}
+
+#[test]
+fn save_as_does_not_follow_a_dangling_symlink_or_leave_temp_files() {
+    let path = temp_path("save-as-link");
+    let dir = path.parent().unwrap().to_path_buf();
+    std::os::unix::fs::symlink(dir.join("nowhere"), &path).unwrap();
+    let mut b = typed("new");
+    assert!(b.save_as(path.clone()).is_err());
+    assert!(!dir.join("nowhere").exists());
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+}
+
+#[test]
+fn save_as_leaves_an_existing_temp_named_file_alone() {
+    let path = temp_path("save-as-tmpname");
+    let dir = path.parent().unwrap().to_path_buf();
+    let decoy = dir.join(".file.txt.ted-tmp");
+    fs::write(&decoy, "decoy").unwrap();
+    let mut b = typed("new");
+    b.save_as(path.clone()).unwrap();
+    assert_eq!(fs::read_to_string(&decoy).unwrap(), "decoy");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+}
+
+#[test]
 fn failed_save_as_on_a_named_buffer_keeps_its_path() {
     let path = temp_path("save-as-named");
     let mut b = Buffer::open(&path).unwrap();

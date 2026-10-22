@@ -89,6 +89,17 @@ fn a_new_prompt_discards_an_untaken_command() {
 }
 
 #[test]
+fn leading_spaces_keep_tab_and_the_match_list_working() {
+    let mut e = open("hello");
+    type_str(&mut e, "  go");
+    assert!(e.view(60, 5).message.starts_with("Command:   go_  goto"), "{:?}", e.view(60, 5).message);
+    e.handle_key(key(KeyCode::Tab));
+    assert_eq!(e.view(60, 5).message, "Command:   goto _");
+    e.handle_key(key(KeyCode::Tab));
+    assert_eq!(e.view(60, 5).message, "Command:   goto _");
+}
+
+#[test]
 fn tab_completes_the_word() {
     let mut e = open("x");
     type_str(&mut e, "go");

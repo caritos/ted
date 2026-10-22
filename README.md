@@ -98,7 +98,7 @@ Ctrl-X opens a `Command:` prompt in the message row (editor only; it does nothin
 | `close` | Close the buffer, with the Ctrl-W warning |
 | `buffers` / `tree` / `git` / `help` | Open that view |
 | `quit` (`q`) | Quit, with the Ctrl-Q warning |
-| `wq` | Save, then quit only if the buffer was saved (an unnamed buffer does not quit) |
+| `wq` | Save, then quit only if the buffer was saved (an unnamed buffer does not quit); another modified buffer gives the usual unsaved-changes warning |
 
 `saveas` resolves a relative path against ted's location (the root of the file tree). It never overwrites: an existing file or directory shows `Exists: <name>`, a file already open in another buffer shows `Already open: <name>`, an empty path shows `Usage: saveas <path>`, and a failed write (for example a missing directory) shows `Save failed: ...` and leaves the buffer's name and unsaved state as they were. On success the extension picks the highlighting. Not done yet: command history, completing arguments or paths, `:set`-style options, replace, running commands from the other views, repeating the last command.
 
@@ -187,7 +187,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 470 unit tests
+cargo test                                   # 480 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```

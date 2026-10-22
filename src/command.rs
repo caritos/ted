@@ -100,9 +100,11 @@ pub fn parse(input: &str) -> Result<Command, String> {
             path => Ok(Command::SaveAs(path.to_string())),
         },
         "goto" => match args.as_slice() {
-            [n] => match n.parse::<usize>() {
-                Ok(n) if n > 0 => Ok(Command::Goto(n)),
-                _ => Err("Usage: goto <line>".to_string()),
+            // All digits: a number too big for usize clamps (to the last line).
+            [n] if n.chars().all(|c| c.is_ascii_digit()) => match n.parse::<usize>() {
+                Ok(0) => Err("Usage: goto <line>".to_string()),
+                Ok(n) => Ok(Command::Goto(n)),
+                Err(_) => Ok(Command::Goto(usize::MAX)),
             },
             _ => Err("Usage: goto <line>".to_string()),
         },
@@ -235,6 +237,16 @@ mod tests {
         assert_eq!(err("s"), "Ambiguous: save, saveas");
         assert_eq!(parse("savea x"), Ok(Command::SaveAs("x".to_string())));
         assert_eq!(matches("sa"), vec!["save", "saveas"]);
+    }
+
+    #[test]
+    fn goto_overflow_clamps_but_other_bad_numbers_are_usage_errors() {
+        assert_eq!(parse("goto 99999999999999999999999999"), Ok(Command::Goto(usize::MAX)));
+        assert_eq!(err("goto -1"), "Usage: goto <line>");
+        assert_eq!(err("goto 0"), "Usage: goto <line>");
+        assert_eq!(err("goto 000"), "Usage: goto <line>");
+        assert_eq!(err("goto 1x"), "Usage: goto <line>");
+        assert_eq!(err("goto +5"), "Usage: goto <line>");
     }
 
     #[test]

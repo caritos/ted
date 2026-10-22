@@ -156,6 +156,9 @@ fn run_git(dir: &Path, args: &[&str]) {
         .arg(dir)
         .args(args)
         .env("LC_ALL", "C")
+        // Ignore the user's and the system's git config.
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .unwrap();
     assert!(
@@ -370,6 +373,32 @@ fn diff_is_truncated_over_cap() {
     let d = git.diff(&base, &ch(ChangeKind::Untracked, "big.txt")).unwrap();
     assert!(d.ends_with("... diff truncated"), "{}", &d[d.len().saturating_sub(40)..]);
     assert!(d.len() < MAX_DIFF_BYTES + 100);
+}
+
+#[test]
+fn diff_ignores_external_diff_and_textconv_from_config() {
+    let t = temp_repo("diff-external");
+    t.write("a.txt", "one\n");
+    t.write(".gitattributes", "*.txt diff=upper\n");
+    t.commit_all("first");
+    t.git(&["config", "diff.external", "echo EXTERNAL"]);
+    t.git(&["config", "diff.upper.textconv", "echo TEXTCONV"]);
+    let git = GitCli::new(t.path());
+    let base = git.head().unwrap();
+    t.write("a.txt", "two\n");
+    t.write("new.txt", "hello\n");
+    assert_eq!(
+        sorted(git.changes(&base).unwrap()),
+        vec![ch(ChangeKind::Modified, "a.txt"), ch(ChangeKind::Untracked, "new.txt")]
+    );
+    for (change, want) in [
+        (ch(ChangeKind::Modified, "a.txt"), "+two"),
+        (ch(ChangeKind::Untracked, "new.txt"), "+hello"),
+    ] {
+        let d = git.diff(&base, &change).unwrap();
+        assert!(!d.contains("EXTERNAL") && !d.contains("TEXTCONV"), "{d}");
+        assert!(d.contains("@@") && d.contains(want), "{d}");
+    }
 }
 
 #[test]

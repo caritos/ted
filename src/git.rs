@@ -242,7 +242,18 @@ impl Git for GitCli {
         // Outside a repo `git diff` silently falls back to --no-index mode.
         self.run(&["rev-parse", "--git-dir"], &[])?;
         let tracked = self.run_text(
-            &["diff", "--name-status", "-z", "--no-renames", "--relative", base.rev(), "--", "."],
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--name-status",
+                "-z",
+                "--no-renames",
+                "--relative",
+                base.rev(),
+                "--",
+                ".",
+            ],
             &[],
         )?;
         let untracked = self.run_text(&["ls-files", "--others", "--exclude-standard", "-z"], &[])?;
@@ -256,14 +267,16 @@ impl Git for GitCli {
     }
 
     fn diff(&self, base: &Baseline, change: &Change) -> Result<String, GitError> {
+        // The user's config must not swap in an external diff tool or a
+        // textconv filter; ted parses plain unified diffs only.
+        let plain = ["diff", "--no-color", "--no-ext-diff", "--no-textconv"];
         let bytes = if change.kind == ChangeKind::Untracked {
             // --no-index exits 1 when the files differ.
-            self.run(&["diff", "--no-color", "--no-index", "--", "/dev/null", &change.path], &[1])?
+            let args = [&plain[..], &["--no-index", "--", "/dev/null", &change.path]].concat();
+            self.run(&args, &[1])?
         } else {
-            self.run(
-                &["diff", "--no-color", "--no-renames", "--relative", base.rev(), "--", &change.path],
-                &[],
-            )?
+            let rest = ["--no-renames", "--relative", base.rev(), "--", &change.path];
+            self.run(&[&plain[..], &rest].concat(), &[])?
         };
         let mut text = String::from_utf8_lossy(&bytes).into_owned();
         if text.len() > MAX_DIFF_BYTES {

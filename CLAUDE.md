@@ -26,3 +26,4 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Not yet verified by hand: look and feel, resize, Option/Alt keys, unsaved-changes quit warning.
 - Deferred: Home/End, PageUp/Down, undo, search, save-as prompt for unnamed buffers, wide-char (CJK/emoji) cursor alignment, syntax highlighting.
 - History: an earlier SwiftUI Mac app attempt lives at git tag `swift-mac-app`.
+- Environment: Homebrew rustup is keg-only; `~/src/config/zsh/zshenv` now adds it and `~/.cargo/bin` to PATH (change is uncommitted in the config repo). See README.md for user-facing docs.

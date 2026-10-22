@@ -40,7 +40,8 @@ pub struct GitView {
     entries: Vec<Entry>,
     /// Selection is kept by path so it survives reordering.
     selected: Option<String>,
-    /// When each listed path was first noticed; survives baseline resets.
+    /// When each path was first noticed. Never pruned or cleared, so it
+    /// resets only when the viewer restarts.
     first_seen: HashMap<String, SystemTime>,
     diff: String,
     diff_scroll: usize,
@@ -104,7 +105,6 @@ impl GitView {
             }
         };
 
-        self.first_seen.retain(|path, _| changes.iter().any(|c| &c.path == path));
         let mut entries: Vec<Entry> = changes
             .into_iter()
             .map(|change| {

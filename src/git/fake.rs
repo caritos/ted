@@ -16,6 +16,8 @@ pub(crate) struct FakeGit {
     pub mtimes: HashMap<String, SystemTime>,
     /// When set, every fallible call returns this error.
     pub fail: Option<GitError>,
+    /// When set, only `diff` returns this error.
+    pub fail_diff: Option<GitError>,
     /// What `baseline_exists` reports for a commit baseline.
     pub existing: bool,
     /// Paths passed to `diff`, in call order.
@@ -31,6 +33,7 @@ impl FakeGit {
             log: Vec::new(),
             mtimes: HashMap::new(),
             fail: None,
+            fail_diff: None,
             existing: true,
             diff_calls: RefCell::new(Vec::new()),
         }
@@ -79,6 +82,9 @@ impl Git for FakeGit {
     fn diff(&self, _base: &Baseline, change: &Change) -> Result<String, GitError> {
         self.check()?;
         self.diff_calls.borrow_mut().push(change.path.clone());
+        if let Some(e) = &self.fail_diff {
+            return Err(e.clone());
+        }
         Ok(self.diffs.get(&change.path).cloned().unwrap_or_default())
     }
 

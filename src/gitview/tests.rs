@@ -391,3 +391,42 @@ fn keys_with_no_selection_do_not_panic() {
         }
     }
 }
+
+#[test]
+fn diff_failure_shows_in_diff_pane_and_keeps_list() {
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, "a.rs", Some(t(30)));
+    git.diffs.insert("a.rs".to_string(), "+real diff\n".to_string());
+    git.fail_diff = Some(GitError::Failed("diff exploded".to_string()));
+    let mut view = refreshed(&git);
+    assert_eq!(view.error(), None);
+    assert_eq!(paths(&view), vec!["a.rs"]);
+    assert_eq!(view.selected_path(), Some("a.rs"));
+    assert_eq!(view.diff(), "Diff failed: diff exploded");
+
+    git.fail_diff = None;
+    view.refresh(&git, t(1001));
+    assert_eq!(view.error(), None);
+    assert_eq!(view.diff(), "+real diff\n");
+}
+
+#[test]
+fn deleted_file_keeps_first_noticed_time_when_it_leaves_and_reenters_list() {
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Deleted, "gone.rs", None);
+    let mut view = GitView::new();
+    view.refresh(&git, t(1000));
+    assert_eq!(view.entry_time("gone.rs"), Some(t(1000)));
+
+    // Another baseline: the deleted file is not a change any more.
+    git.remove("gone.rs");
+    git.add(ChangeKind::Modified, "mid.rs", Some(t(1500)));
+    view.refresh(&git, t(2000));
+    assert_eq!(paths(&view), vec!["mid.rs"]);
+
+    // Back again: it keeps 1000, so it sorts below mid.rs (1500).
+    git.add(ChangeKind::Deleted, "gone.rs", None);
+    view.refresh(&git, t(3000));
+    assert_eq!(paths(&view), vec!["mid.rs", "gone.rs"]);
+    assert_eq!(view.entry_time("gone.rs"), Some(t(1000)));
+}

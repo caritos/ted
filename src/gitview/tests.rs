@@ -634,6 +634,75 @@ fn render_status_is_padded_to_exactly_width() {
     }
 }
 
+/// Text with terminal escapes, a lone CR, DEL and a C1 control.
+const NASTY: &str = "a\x1b[31mb\x1b]0;title\x07c\rd\x7fe\u{9b}f";
+
+fn is_control(c: char) -> bool {
+    c.is_control()
+}
+
+fn assert_no_controls(screen: &Screen) {
+    for row in &screen.rows {
+        for span in row {
+            assert!(!span.text.chars().any(is_control), "span {:?}", span.text);
+        }
+    }
+    assert!(!screen.status.chars().any(is_control), "status {:?}", screen.status);
+    assert!(!screen.message.chars().any(is_control), "message {:?}", screen.message);
+}
+
+#[test]
+fn sanitize_maps_controls_to_question_mark_and_keeps_the_rest() {
+    assert_eq!(sanitize(NASTY), "a?[31mb?]0;title?c?d?e?f");
+    assert_eq!(sanitize("caf\u{e9} \u{65e5}\u{672c} \u{a0}x"), "caf\u{e9} \u{65e5}\u{672c} \u{a0}x");
+}
+
+#[test]
+fn render_never_passes_control_characters_to_the_terminal() {
+    // File names and diff lines.
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Deleted, NASTY, None);
+    git.diffs.insert(NASTY.to_string(), format!("+{NASTY}\n-{NASTY}\n {NASTY}\n"));
+    let mut view = refreshed(&git);
+    for w in [0, 1, 10, 40, 120] {
+        assert_no_controls(&view.render(w, 8, t(1000)));
+    }
+    let wide = view.render(200, 8, t(1000));
+    assert!(row_text(&wide.rows[0]).contains("a?[31mb?]0;title?c?d?e?f"));
+
+    // The message row (built from the path).
+    view.handle_key(key(KeyCode::Enter), &git, t(1000));
+    assert!(view.message().contains('\x1b'));
+    assert_no_controls(&view.render(200, 8, t(1000)));
+
+    // Commit subjects and refs in the picker.
+    let mut pick = FakeGit::new();
+    let mut c = commit("abcdef1234", NASTY);
+    c.refs = vec![NASTY.to_string()];
+    pick.log = vec![c];
+    let mut view = refreshed(&pick);
+    view.handle_key(ch('b'), &pick, t(1000));
+    for w in [0, 1, 10, 40, 200] {
+        assert_no_controls(&view.render(w, 6, t(1000)));
+    }
+
+    // Error text from git stderr.
+    let mut err = FakeGit::new();
+    err.fail = Some(GitError::Failed(NASTY.to_string()));
+    assert_no_controls(&refreshed(&err).render(80, 6, t(1000)));
+}
+
+#[test]
+fn render_keeps_normal_unicode_text() {
+    let name = "caf\u{e9}/\u{65e5}\u{672c}.rs";
+    let mut git = FakeGit::new();
+    git.add(ChangeKind::Modified, name, Some(t(1)));
+    git.diffs.insert(name.to_string(), "+\u{fc}ber \u{2713}\n".to_string());
+    let screen = render_git(&git, 80, 6);
+    assert!(row_text(&screen.rows[0]).starts_with(&format!("M {name}")));
+    assert!(row_text(&screen.rows[0]).ends_with("+\u{fc}ber \u{2713}"));
+}
+
 #[test]
 fn render_with_unicode_paths_clips_by_char_not_byte() {
     let name = "\u{65e5}\u{672c}\u{8a9e}\u{30d5}\u{30a1}\u{30a4}\u{30eb}\u{540d}\u{524d}.rs";

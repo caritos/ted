@@ -418,9 +418,26 @@ fn diff_style(line: &str) -> Style {
     }
 }
 
-/// At most `n` characters of `s`.
+/// `s` safe to print: C0 controls, DEL and C1 controls become `?` so text
+/// from git, file names or messages can never send escape sequences, carriage
+/// returns and the like to the terminal. A tab (diff lines expand theirs
+/// before this) becomes one space so the width stays one column.
+fn sanitize(s: &str) -> String {
+    s.chars().map(sanitize_char).collect()
+}
+
+fn sanitize_char(c: char) -> char {
+    match c {
+        '\t' => ' ',
+        c if c.is_control() => '?',
+        c => c,
+    }
+}
+
+/// At most `n` characters of `s`, sanitized. Every piece of text in a row,
+/// the status or the message goes through here.
 fn clip(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
+    sanitize(&s.chars().take(n).collect::<String>())
 }
 
 /// `s` clipped or space-padded to exactly `n` characters.

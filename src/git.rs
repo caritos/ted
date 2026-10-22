@@ -1,6 +1,7 @@
 use std::fmt;
+use std::io::{self, Read};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::SystemTime;
 
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -156,6 +157,69 @@ pub trait Git {
     fn modified(&self, path: &str) -> Option<SystemTime>;
 }
 
+/// Output of a command whose stdout was read only up to a cap.
+struct Capped {
+    /// At most `cap + 1` bytes.
+    stdout: Vec<u8>,
+    /// More than `cap` bytes arrived; the child was killed and `status` and
+    /// `stderr` are not meaningful.
+    truncated: bool,
+    status: Option<ExitStatus>,
+    stderr: Vec<u8>,
+}
+
+/// Runs `cmd`, reading at most `cap + 1` bytes of stdout. Past the cap the
+/// child is killed and reaped instead of waiting for it to finish, so a huge
+/// output never has to be produced or held in memory.
+fn output_capped(mut cmd: Command, cap: usize) -> io::Result<Capped> {
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    // Drained on a thread so a full stderr pipe cannot block the child
+    // while it is being read here.
+    let mut err_pipe = child.stderr.take();
+    let stderr = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = &mut err_pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let mut stdout = Vec::new();
+    let read = match child.stdout.take() {
+        Some(pipe) => pipe.take(cap as u64 + 1).read_to_end(&mut stdout).map(|_| ()),
+        None => Ok(()),
+    };
+    if read.is_err() || stdout.len() > cap {
+        let _ = child.kill();
+        let _ = child.wait();
+        // The stderr thread ends on its own once the pipe closes; it is
+        // not joined in case a grandchild still holds the pipe open.
+        read?;
+        return Ok(Capped { stdout, truncated: true, status: None, stderr: Vec::new() });
+    }
+    let status = child.wait()?;
+    let stderr = stderr.join().unwrap_or_default();
+    Ok(Capped { stdout, truncated: false, status: Some(status), stderr })
+}
+
+/// Success when `status` is 0 or one of `ok_codes`, else the error from
+/// `stderr`.
+fn check(status: ExitStatus, stderr: &[u8], args: &[&str], ok_codes: &[i32]) -> Result<(), GitError> {
+    if status.success() || status.code().is_some_and(|c| ok_codes.contains(&c)) {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(stderr);
+    if stderr.contains("not a git repository") {
+        return Err(GitError::NotARepo);
+    }
+    let msg = stderr.trim();
+    Err(GitError::Failed(if msg.is_empty() {
+        format!("git {} failed", args.first().copied().unwrap_or(""))
+    } else {
+        msg.to_string()
+    }))
+}
+
 pub struct GitCli {
     dir: PathBuf,
 }
@@ -186,20 +250,21 @@ impl GitCli {
             .args(args)
             .output()
             .map_err(|e| GitError::Failed(format!("could not run git: {e}")))?;
-        let code = out.status.code();
-        if out.status.success() || code.is_some_and(|c| ok_codes.contains(&c)) {
-            return Ok(out.stdout);
+        check(out.status, &out.stderr, args, ok_codes)?;
+        Ok(out.stdout)
+    }
+
+    /// Like `run`, but reads at most `cap + 1` bytes of stdout; the flag is
+    /// true when the output was longer than `cap`.
+    fn run_capped(&self, args: &[&str], ok_codes: &[i32], cap: usize) -> Result<(Vec<u8>, bool), GitError> {
+        let mut cmd = self.command();
+        cmd.args(args);
+        let out = output_capped(cmd, cap)
+            .map_err(|e| GitError::Failed(format!("could not run git: {e}")))?;
+        if let Some(status) = out.status {
+            check(status, &out.stderr, args, ok_codes)?;
         }
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if stderr.contains("not a git repository") {
-            return Err(GitError::NotARepo);
-        }
-        let msg = stderr.trim();
-        Err(GitError::Failed(if msg.is_empty() {
-            format!("git {} failed", args.first().copied().unwrap_or(""))
-        } else {
-            msg.to_string()
-        }))
+        Ok((out.stdout, out.truncated))
     }
 
     fn run_text(&self, args: &[&str], ok_codes: &[i32]) -> Result<String, GitError> {
@@ -270,26 +335,30 @@ impl Git for GitCli {
         // The user's config must not swap in an external diff tool or a
         // textconv filter; ted parses plain unified diffs only.
         let plain = ["diff", "--no-color", "--no-ext-diff", "--no-textconv"];
-        let bytes = if change.kind == ChangeKind::Untracked {
+        let (mut bytes, truncated) = if change.kind == ChangeKind::Untracked {
             // --no-index exits 1 when the files differ.
             let args = [&plain[..], &["--no-index", "--", "/dev/null", &change.path]].concat();
-            self.run(&args, &[1])?
+            self.run_capped(&args, &[1], MAX_DIFF_BYTES)?
         } else {
             let rest = ["--no-renames", "--relative", base.rev(), "--", &change.path];
-            self.run(&[&plain[..], &rest].concat(), &[])?
+            self.run_capped(&[&plain[..], &rest].concat(), &[], MAX_DIFF_BYTES)?
         };
-        let mut text = String::from_utf8_lossy(&bytes).into_owned();
-        if text.len() > MAX_DIFF_BYTES {
-            let mut cut = MAX_DIFF_BYTES;
-            while !text.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            text.truncate(cut);
-            if let Some(nl) = text.rfind('\n') {
-                text.truncate(nl + 1);
-            }
-            text.push_str("... diff truncated");
+        if !truncated {
+            return Ok(String::from_utf8_lossy(&bytes).into_owned());
         }
+        // Cut within the cap at a UTF-8 character boundary (`bytes` holds
+        // one byte past the cap, so the byte at `cut` exists), then back to
+        // the last whole line if there is one.
+        let mut cut = MAX_DIFF_BYTES;
+        while cut > 0 && (bytes[cut] & 0xC0) == 0x80 {
+            cut -= 1;
+        }
+        bytes.truncate(cut);
+        if let Some(nl) = bytes.iter().rposition(|&b| b == b'\n') {
+            bytes.truncate(nl + 1);
+        }
+        let mut text = String::from_utf8_lossy(&bytes).into_owned();
+        text.push_str("... diff truncated");
         Ok(text)
     }
 

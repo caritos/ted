@@ -376,6 +376,45 @@ fn diff_is_truncated_over_cap() {
 }
 
 #[test]
+fn output_capped_stops_at_cap_without_waiting_for_eof() {
+    // Writes more than the cap, then keeps stdout open for 30 s.
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", "head -c 300000 /dev/zero; exec sleep 30"]);
+    let start = std::time::Instant::now();
+    let out = output_capped(cmd, 1000).unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(out.truncated);
+    assert_eq!(out.stdout.len(), 1001);
+}
+
+#[test]
+fn output_capped_returns_everything_and_status_under_cap() {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", "printf hello; printf oops >&2; exit 3"]);
+    let out = output_capped(cmd, 1000).unwrap();
+    assert!(!out.truncated);
+    assert_eq!(out.stdout, b"hello");
+    assert_eq!(out.stderr, b"oops");
+    assert_eq!(out.status.and_then(|s| s.code()), Some(3));
+}
+
+#[test]
+fn diff_of_huge_file_is_truncated_promptly() {
+    let t = temp_repo("diff-huge");
+    t.write("a", "1\n");
+    t.commit_all("first");
+    let git = GitCli::new(t.path());
+    let base = git.head().unwrap();
+    t.write("huge.txt", &"0123456789abcdef\n".repeat(2_000_000));
+    let start = std::time::Instant::now();
+    let d = git.diff(&base, &ch(ChangeKind::Untracked, "huge.txt")).unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(10), "{:?}", start.elapsed());
+    assert!(d.ends_with("\n... diff truncated"), "{}", &d[d.len().saturating_sub(40)..]);
+    assert!(d.len() <= MAX_DIFF_BYTES + "... diff truncated".len());
+    assert!(d.contains("+0123456789abcdef\n"));
+}
+
+#[test]
 fn diff_ignores_external_diff_and_textconv_from_config() {
     let t = temp_repo("diff-external");
     t.write("a.txt", "one\n");

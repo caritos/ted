@@ -312,7 +312,8 @@ impl GitView {
                     c.refs.join(", ")
                 );
                 let style = if i == picker.selected { Style::Selected } else { Style::Normal };
-                styled(&text, width, style)
+                // Padded, as in the file list, so the selection bar spans the row.
+                vec![Span { text: pad(&text, width), style }]
             })
             .collect()
     }

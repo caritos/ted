@@ -606,7 +606,8 @@ fn render_picker_rows_contain_short_hash_subject_time_and_refs() {
     let mut view = refreshed(&git);
     view.handle_key(ch('b'), &git, t(1000));
     let screen = view.render(80, 8, t(1000));
-    assert_eq!(row_text(&screen.rows[0]), "abcdef1  first  2023-11-14 22:13  [main, v1]");
+    // Padded so the selection bar spans the whole row.
+    assert_eq!(row_text(&screen.rows[0]), format!("{:<80}", "abcdef1  first  2023-11-14 22:13  [main, v1]"));
     assert_eq!(screen.rows[0][0].style, Style::Selected);
     assert!(row_text(&screen.rows[1]).starts_with("1234567  second"));
     assert_eq!(screen.rows[1][0].style, Style::Normal);

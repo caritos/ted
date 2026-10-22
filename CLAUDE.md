@@ -4,7 +4,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 
 ## Layout
 - `src/buffer.rs` - rope-backed text + cursor + file load/atomic save; records the lowest edited row (`take_dirty_row`) for the highlight cache. No terminal code.
-- `src/editor.rs` - key handling, scrolling, status/message (plus a `[i/n]` tag set by the app). `Editor::view()` returns a pure `View`.
+- `src/editor.rs` - key handling, scrolling, status/message (plus a `[i/n]` tag and the line number setting, both set by the app). `Editor::view()` returns a pure `View`; with line numbers on, its lines start with the gutter (`Style::LineNo`, hidden when fewer than 10 text columns would remain).
 - `src/git.rs` - runs the `git` CLI (read-only) behind a `Git` trait: status, diff, log, baseline. No terminal code.
 - `src/gitview.rs` - git view state machine: file list, selection by path, diff scroll, commit picker, refresh.
 - `src/text.rs` - shared text helpers (width fitting, truncation, `sanitize`) used by the views. Every string drawn (editor rows, status, message; git view; file tree) maps control chars to `?` one-for-one; in the editor that happens in `editor.rs`'s private `clip`, the only builder of `View` strings.
@@ -30,6 +30,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-22 (line numbers)
+- Done (unit-tested, 393 tests in total): `Editor` gutter (right-aligned in max(3, digits) columns + space, dim `Style::LineNo`, blank next to `~`, hidden on narrow widths, cursor/scroll/clipping on the text area; tests in `src/editor/gutter_tests.rs`, tiny-size sweep now 0..=16 x 0..=6 so it crosses the hide threshold); `App` owns `line_numbers` (default on) and applies it to the current editor before every `screen()`; F2 toggles it for all buffers in the editor only (ignored in the changes view, tree, buffer list, help; swallowed by an open prompt; withdraws a pending quit/close warning like any key); help lists F2 (Ctrl-S/Ctrl-Q still on the first 80x24 screen). App tests in `src/app/tests/gutter.rs`; four older App tests now expect the gutter.
+- Done (pty smoke, 89 checks, 7 new): 12-line file shows `  1 line 0` and ` 12 line 11` (dim) on start, F2 hides it (`line 0` stays), F2 restores it, third F2 hides again, exit 0. Seen failing (5 checks) against the previously installed `~/.cargo/bin/ted`. The `.txt` no-dim highlighting check now ignores the dim gutter and still fails on any other dim.
+- Not yet verified by hand: how the dim gutter looks on a real terminal and theme, F2 over ssh/tmux (some terminals send F2 differently), resize with the gutter on.
+- Deferred: current-line number highlight, relative numbers, per-file or saved (persisted) setting.
 ### 2026-10-22 (search and go to line)
 - Done (unit-tested, 373 tests in total): `Buffer::find` / `set_cursor` / `go_to_line`; `Editor` one-line prompt in the message row (Ctrl-F find: incremental, smart case, wraps, Down/Ctrl-F next, Up previous, Enter accepts, Esc restores cursor and scroll; Ctrl-L go to line; F3 next match); `App` sends every key except Ctrl-Q to an open prompt (Ctrl-Q cancels it, then the normal quit rules; any other key withdraws a pending quit/close warning); Ctrl-F / Ctrl-L / F3 do nothing in the git view, tree, buffer list and help; help table lists them (Ctrl-S and Ctrl-Q still on the first 80x24 screen). App tests in `src/app/tests/search.rs`.
 - Done (pty smoke, 82 checks, 12 new): 200-line file; Ctrl-F "line 150" + Enter (status `150:1`), Ctrl-L "10" + Enter (`10:1`), second Ctrl-F shows the prefilled `Find: line 150`, 8 Backspaces clear it, `zzz` shows `not found`, Esc keeps `10:1`, "line 15" + Enter (`15:1`), F3 -> `150:1`, exit 0. Seen failing (11 of 12; only "line 150 is not on the first screen" passes) against the previously installed `~/.cargo/bin/ted`, and the F3 check seen failing with the F3 handler stubbed out. After go-to-line 10, line 10 is the top row, so no `line 9` check.

@@ -38,6 +38,7 @@ impl Git for Shared {
     }
 }
 
+mod gutter;
 mod help;
 mod search;
 
@@ -286,7 +287,7 @@ fn not_a_repo_location_shows_error_in_git_view_and_editor_still_works() {
     type_str(&mut app, "b");
     assert_eq!(app.editor().buffer().text(), "ab");
     let screen = app.screen(20, 4, t(1000));
-    assert_eq!(row_text(&screen, 0), "ab");
+    assert_eq!(row_text(&screen, 0), "  1 ab");
 }
 
 #[test]
@@ -319,12 +320,15 @@ fn screen_of_editor_matches_editor_view_text() {
     let screen = app.screen(20, 6, t(1000));
 
     let mut editor = Editor::new(Buffer::from_text("one\ntwo"));
+    editor.set_line_numbers(true);
     editor.handle_key(key(KeyCode::Down));
     let view = editor.view(20, 6);
+    assert_eq!(view.lines[0], "  1 one");
 
     let rows: Vec<String> = (0..screen.rows.len()).map(|i| row_text(&screen, i)).collect();
     assert_eq!(rows, view.lines);
-    assert!(screen.rows.iter().all(|r| r.len() == 1 && r[0].style == Style::Normal));
+    // Gutter (LineNo) span, then the text: a plain file has no other styles.
+    assert!(screen.rows[..2].iter().all(|r| r.len() == 2 && r[0].style == Style::LineNo && r[1].style == Style::Normal));
     assert_eq!(screen.status, view.status);
     assert_eq!(screen.message, view.message);
     assert_eq!(screen.cursor, Some(view.cursor));
@@ -753,15 +757,23 @@ fn app_groups_equal_styles_into_spans_and_keeps_text_identical() {
     let editor = Editor::new(Buffer::open(&path).unwrap());
     let mut app = app_with(editor, dir, one_file());
     let screen = app.screen(30, 6, t(1000));
-    assert_eq!(row_text(&screen, 0), "fn a() {} // hi");
+    assert_eq!(row_text(&screen, 0), "  1 fn a() {} // hi");
     let spans: Vec<(&str, Style)> =
         screen.rows[0].iter().map(|s| (s.text.as_str(), s.style)).collect();
     assert_eq!(
         spans,
-        vec![("fn", Style::Keyword), (" a() {} ", Style::Normal), ("// hi", Style::Comment)]
+        vec![
+            ("  1 ", Style::LineNo),
+            ("fn", Style::Keyword),
+            (" a() {} ", Style::Normal),
+            ("// hi", Style::Comment)
+        ]
     );
-    assert_eq!(screen.rows[1], vec![Span { text: "plain".into(), style: Style::Normal }]);
-    assert_eq!(screen.rows[3], vec![Span { text: "~".into(), style: Style::Normal }]);
+    assert_eq!(
+        screen.rows[1],
+        vec![Span { text: "  2 ".into(), style: Style::LineNo }, Span { text: "plain".into(), style: Style::Normal }]
+    );
+    assert_eq!(row_text(&screen, 3).trim(), "~");
 }
 
 #[test]
@@ -791,8 +803,8 @@ fn editor_screen_spans_carry_no_control_characters() {
                 assert!(!span.text.chars().any(char::is_control), "{name}: {:?}", span.text);
             }
         }
-        assert_eq!(row_text(&screen, 0), "a ?[31mred?[0m ?]0;t?");
-        assert_eq!(row_text(&screen, 1), "b ? ?  c");
+        assert_eq!(row_text(&screen, 0), "  1 a ?[31mred?[0m ?]0;t?");
+        assert_eq!(row_text(&screen, 1), "  2 b ? ?  c");
         assert!(!screen.status.chars().any(char::is_control));
         assert!(!screen.message.chars().any(char::is_control));
     }

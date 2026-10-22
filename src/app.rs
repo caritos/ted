@@ -52,6 +52,9 @@ pub struct App {
     help_from: Mode,
     /// The `F1: help` hint is still waiting for the first key.
     hint_pending: bool,
+    /// Line number gutter, one setting for every buffer; applied to the
+    /// current editor before each draw.
+    line_numbers: bool,
 }
 
 impl App {
@@ -72,6 +75,7 @@ impl App {
             help: Help::new(),
             help_from: Mode::Editor,
             hint_pending: true,
+            line_numbers: true,
         }
     }
 
@@ -239,6 +243,10 @@ impl App {
                 self.enter_file_tree();
                 return Flow::Continue;
             }
+            if key.code == KeyCode::F(2) {
+                self.line_numbers = !self.line_numbers;
+                return Flow::Continue;
+            }
             return self.editor_mut().handle_key(key);
         }
 
@@ -320,6 +328,8 @@ impl App {
         let n = self.editors.len();
         let tag = if n > 1 { format!("[{}/{}]", self.current + 1, n) } else { String::new() };
         self.editor_mut().set_tag(tag);
+        let line_numbers = self.line_numbers;
+        self.editor_mut().set_line_numbers(line_numbers);
         if self.mode == Mode::Help {
             return self.help.render(width, height);
         }

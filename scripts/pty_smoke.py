@@ -1,6 +1,7 @@
 import fcntl
 import os
 import pty
+import re
 import select
 import shutil
 import struct
@@ -314,7 +315,10 @@ try:
     out, ok = open_and_quit(txt)
     check("txt: text is shown", b'fn main() { let s = "hi"; } // note' in out, out[:300])
     check("txt: no syntax colors", b"\x1b[38;5;" not in out, out[:300])
-    check("txt: nothing dim", b"\x1b[2m" not in out, out[:300])
+    # The line number gutter is dim by design; nothing else on a .txt file may be.
+    no_gutter = re.sub(rb"\x1b\[2m[ 0-9]*\x1b\[0m", b"", out)
+    check("txt: gutter is dim", b"\x1b[2m  1 " in out, out[:300])
+    check("txt: nothing but the gutter is dim", b"\x1b[2m" not in no_gutter, out[:300])
     check("txt session exits 0", ok)
 finally:
     shutil.rmtree(hl, ignore_errors=True)
@@ -547,6 +551,55 @@ finally:
         except OSError:
             pass
     shutil.rmtree(sp, ignore_errors=True)
+
+# 17. line numbers: on by default, F2 hides them, F2 again shows them. Each
+# screen is checked on the bytes after the keypress (a full-row redraw), with
+# concrete text: `  1 line 0` is the gutter plus the text, so style escapes
+# (the gutter is its own dim span) are stripped before looking.
+def plain(b):
+    return re.sub(rb"\x1b\[[0-9;]*m", b"", b)
+
+
+F2 = b"\x1bOQ"
+lp = tempfile.mkdtemp(prefix="ted-smoke-lines-")
+pid = fd = None
+try:
+    p = os.path.join(lp, "n.txt")
+    with open(p, "w") as f:
+        f.write("".join(f"line {n}\n" for n in range(12)))
+    pid, fd = spawn([p])
+    raw = drain(fd)
+    out = plain(raw)
+    check("lines: gutter shown on start", b"  1 line 0" in out and b" 12 line 11" in out, out[-300:])
+    check("lines: gutter is dim", b"\x1b[2m  1 " in raw, raw[-300:])
+    send(fd, F2)
+    out = plain(drain(fd))
+    check("lines: F2 hides the gutter (text kept)", b"line 0" in out and b"  1 line 0" not in out and b" 12 line 11" not in out, out[-300:])
+    send(fd, F2)
+    out = plain(drain(fd))
+    check("lines: F2 again restores it", b"  1 line 0" in out and b" 12 line 11" in out, out[-300:])
+    send(fd, F2)
+    out = plain(drain(fd))
+    check("lines: third F2 hides it again", b"line 0" in out and b"  1 line 0" not in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("lines: F2 did not modify the buffer, exit 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(lp, ignore_errors=True)
 
 shutil.rmtree(tmp, ignore_errors=True)
 

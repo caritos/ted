@@ -124,7 +124,7 @@ fn gutter_hides_below_the_threshold() {
 #[test]
 fn tiny_sizes_do_not_panic_with_the_gutter_on_or_off() {
     for on in [false, true] {
-        for w in 0..=6 {
+        for w in 0..=16 {
             for h in 0..=6 {
                 let mut e = Editor::new(Buffer::from_text("hello\nworld\nfoo"));
                 e.set_line_numbers(on);

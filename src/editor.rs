@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::buffer::Buffer;
 use crate::highlight::{highlight_line, Language, LineState, Token};
 use crate::screen::Style;
+use crate::text::sanitize_char;
 
 const TAB_WIDTH: usize = 4;
 
@@ -12,7 +13,8 @@ pub enum Flow {
     Quit,
 }
 
-/// Everything the terminal layer needs to draw one frame.
+/// Everything the terminal layer needs to draw one frame. All text is
+/// sanitized (see `clip`): it holds no control characters.
 #[derive(Debug)]
 pub struct View {
     /// Exactly the visible text rows, already clipped to the width.
@@ -154,7 +156,7 @@ impl Editor {
         View {
             lines,
             styles,
-            status: self.status_line(width),
+            status: clip(&self.status_line(width), 0, width),
             message: clip(&self.message, 0, width),
             cursor: (row - self.scroll_row, col - self.scroll_col),
         }
@@ -258,9 +260,12 @@ fn token_style(token: Token) -> Style {
     }
 }
 
-/// `width` chars of `text` starting at char `skip`.
+/// `width` chars of `text` starting at char `skip`, sanitized one char for
+/// one char. Every string in a `View` (rows, status, message) is built here,
+/// so text from the file, its name or an error can never reach the terminal
+/// as an escape sequence, while columns and styles stay aligned.
 fn clip(text: &str, skip: usize, width: usize) -> String {
-    text.chars().skip(skip).take(width).collect()
+    text.chars().skip(skip).take(width).map(sanitize_char).collect()
 }
 
 #[cfg(test)]

@@ -15,7 +15,9 @@ pub(crate) fn sanitize(s: &str) -> String {
     s.chars().map(sanitize_char).collect()
 }
 
-fn sanitize_char(c: char) -> char {
+/// One char of [`sanitize`]: always exactly one char out per char in, so
+/// columns and per-char styles stay aligned with the text they describe.
+pub(crate) fn sanitize_char(c: char) -> char {
     match c {
         '\t' => ' ',
         c if c.is_control() => '?',

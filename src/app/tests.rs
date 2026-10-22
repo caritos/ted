@@ -800,3 +800,24 @@ fn spans_never_drop_text_when_styles_are_short() {
     );
     assert_eq!(spans("xy", &[]), vec![Span { text: "xy".into(), style: Style::Normal }]);
 }
+
+#[test]
+fn editor_screen_spans_carry_no_control_characters() {
+    let text = "a \x1b[31mred\x1b[0m \x1b]0;t\x07\nb \x7f \u{9b} \tc\n";
+    for name in ["n.txt", "n.rs"] {
+        let dir = Temp::new("ctl");
+        dir.file(name, text);
+        let editor = Editor::new(Buffer::open(&dir.0.join(name)).unwrap());
+        let mut app = app_with(editor, dir.0.clone(), one_file());
+        let screen = app.screen(40, 6, t(1000));
+        for row in &screen.rows {
+            for span in row {
+                assert!(!span.text.chars().any(char::is_control), "{name}: {:?}", span.text);
+            }
+        }
+        assert_eq!(row_text(&screen, 0), "a ?[31mred?[0m ?]0;t?");
+        assert_eq!(row_text(&screen, 1), "b ? ?  c");
+        assert!(!screen.status.chars().any(char::is_control));
+        assert!(!screen.message.chars().any(char::is_control));
+    }
+}

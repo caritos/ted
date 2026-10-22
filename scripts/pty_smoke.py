@@ -319,6 +319,25 @@ try:
 finally:
     shutil.rmtree(hl, ignore_errors=True)
 
+# 12. escape sequences in the file are shown as text, never sent to the
+# terminal: ESC becomes `?`. A .txt file gets no styling of its own, so any
+# \x1b[31m or \x1b[2J in the output came from the file.
+esc = tempfile.mkdtemp(prefix="ted-smoke-esc-")
+try:
+    p = os.path.join(esc, "esc.txt")
+    with open(p, "wb") as f:
+        f.write(b"\x1b[31mRED \x1b[2J END\n")
+    out, ok = open_and_quit(p)
+    # ted clears the alternate screen once on entry; any other \x1b[2J is the file's.
+    after_entry = out.replace(b"\x1b[?1049h\x1b[2J", b"", 1)
+    check("esc: ted's own entry clear seen once", out.count(b"\x1b[?1049h\x1b[2J") == 1, out[:300])
+    check("esc: clear-screen from file not sent", b"\x1b[2J" not in after_entry, out[:300])
+    check("esc: color from file not sent", b"\x1b[31m" not in out, out[:300])
+    check("esc: shown as ? text", b"?[31mRED" in out and b"END" in out, out[:300])
+    check("esc session exits 0", ok)
+finally:
+    shutil.rmtree(esc, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

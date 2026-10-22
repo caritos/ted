@@ -530,3 +530,82 @@ fn load_clears_the_highlight_cache() {
     e.view(30, 10);
     assert!(e.line_states.is_empty());
 }
+
+// ---- Control characters never reach the terminal ----
+
+/// Lines with CSI and OSC sequences, a lone CR (ropey splits the line
+/// there), DEL, a C1 CSI and a tab.
+const NASTY: &str =
+    "red \x1b[31mX\x1b[0m end\nset \x1b]0;t\x07 title\ncr a\rb\ndel \x7f c1 \u{9b}2J\ttab\n";
+
+fn has_control(s: &str) -> bool {
+    s.chars().any(char::is_control)
+}
+
+#[test]
+fn view_shows_control_characters_as_safe_one_column_stand_ins() {
+    for name in ["a.txt", "a.rs"] {
+        let mut e = named_editor(name, NASTY);
+        e.message = "Save failed: \x1b]52;c;eA==\x07 \u{9d}".to_string();
+        let v = e.view(60, 10);
+        assert_aligned(&v);
+        for (i, line) in v.lines.iter().enumerate() {
+            assert!(!has_control(line), "{name} row {i}: {line:?}");
+            if i < e.buffer.line_count() {
+                // One display char per buffer char, so columns stay aligned.
+                let raw = e.buffer.line(i);
+                assert_eq!(line.chars().count(), raw.chars().count(), "{name} row {i}");
+                assert_eq!(*line, crate::text::sanitize(&raw), "{name} row {i}");
+            }
+        }
+        assert_eq!(v.lines[0], "red ?[31mX?[0m end");
+        assert_eq!(v.lines[1], "set ?]0;t? title");
+        assert_eq!(v.lines[4], "del ? c1 ?2J tab");
+        assert!(!has_control(&v.status), "{:?}", v.status);
+        assert!(!has_control(&v.message), "{:?}", v.message);
+        assert_eq!(v.message, "Save failed: ?]52;c;eA==? ?");
+    }
+}
+
+#[test]
+fn control_characters_keep_cursor_and_horizontal_scroll_aligned() {
+    let mut e = named_editor("a.rs", "\x1b[2Jlet \x7f = \"\x1b\";\n");
+    press(&mut e, KeyCode::Right, 12);
+    let v = e.view(6, 4);
+    assert_aligned(&v);
+    assert_eq!(v.lines[0], " ? = \"");
+    assert_eq!(v.cursor, (0, 5));
+    press(&mut e, KeyCode::Right, 3);
+    let v = e.view(6, 4);
+    assert_aligned(&v);
+    assert_eq!(v.lines[0], "= \"?\";");
+    assert_eq!(v.styles[0][3], Style::Str);
+    assert_eq!(v.cursor, (0, 5));
+    assert!(v.lines.iter().all(|l| !has_control(l)));
+}
+
+#[test]
+fn file_name_with_an_escape_shows_a_question_mark_in_the_status_bar() {
+    let dir = temp_file("escname").parent().unwrap().to_path_buf();
+    let path = dir.join("a\x1b]0;x\x07b.txt");
+    fs::write(&path, "hi\n").unwrap();
+    let mut e = Editor::new(Buffer::open(&path).unwrap());
+    for width in [0, 3, 10, 30, 80] {
+        let v = e.view(width, 5);
+        assert!(!has_control(&v.status), "{:?}", v.status);
+        assert_eq!(v.status.chars().count(), width, "{:?}", v.status);
+    }
+    let status = e.view(80, 5).status;
+    assert!(status.starts_with(" a?]0;x?b.txt "), "{status:?}");
+}
+
+#[test]
+fn saving_a_file_with_control_characters_writes_the_original_bytes() {
+    let path = temp_file("ctlsave");
+    fs::write(&path, NASTY).unwrap();
+    let mut e = Editor::new(Buffer::open(&path).unwrap());
+    e.view(40, 10);
+    e.handle_key(ctrl('s'));
+    assert!(e.message().starts_with("Saved"), "{}", e.message());
+    assert_eq!(fs::read(&path).unwrap(), NASTY.as_bytes());
+}

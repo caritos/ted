@@ -458,7 +458,7 @@ fn render_shows_status_letter_path_and_age() {
     assert_eq!(screen.rows.len(), 8);
     assert!(row_text(&screen.rows[0]).starts_with("M a.rs  1m"));
     assert!(row_text(&screen.rows[1]).starts_with("? b.rs  15m"));
-    assert_eq!(screen.status, "Baseline h1  2 changes");
+    assert_eq!(screen.status, format!("{:<60}", "Baseline h1  2 changes"));
     assert_eq!(screen.cursor, None);
 }
 
@@ -523,14 +523,14 @@ fn render_keeps_selected_row_visible_in_short_list() {
 fn render_empty_state_text() {
     let screen = render_git(&FakeGit::new(), 60, 6);
     assert!(row_text(&screen.rows[0]).contains("No changes since"));
-    assert_eq!(screen.status, "Baseline h1  0 changes");
+    assert_eq!(screen.status, format!("{:<60}", "Baseline h1  0 changes"));
 }
 
 #[test]
 fn render_empty_repo_baseline_text() {
     let mut git = FakeGit::new();
     git.head = Baseline::Empty;
-    assert_eq!(render_git(&git, 60, 6).status, "Baseline: (no commits)  0 changes");
+    assert_eq!(render_git(&git, 60, 6).status, format!("{:<60}", "Baseline: (no commits)  0 changes"));
 }
 
 #[test]
@@ -617,6 +617,19 @@ fn render_never_exceeds_width_or_height() {
             let mut view = refreshed(&pick);
             view.handle_key(ch('b'), &pick, t(1000));
             assert_fits(&view.render(w, h, t(1000)), w, h);
+        }
+    }
+}
+
+#[test]
+fn render_status_is_padded_to_exactly_width() {
+    let mut err = FakeGit::new();
+    err.fail = Some(GitError::NotARepo);
+    for git in [two_files(), FakeGit::new(), err] {
+        let view = refreshed(&git);
+        for w in [0, 1, 2, 5, 10, 22, 23, 40, 80, 200] {
+            let screen = view.render(w, 6, t(1000));
+            assert_eq!(screen.status.chars().count(), w, "width {w}: {:?}", screen.status);
         }
     }
 }

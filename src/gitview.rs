@@ -274,7 +274,8 @@ impl GitView {
         rows.resize_with(body_h, Vec::new);
 
         let (status, message) = if height >= 2 {
-            (clip(&self.status_text(), width), clip(&self.message, width))
+            // Padded so the reverse-video bar overwrites the whole row.
+            (pad(&self.status_text(), width), clip(&self.message, width))
         } else {
             (String::new(), String::new())
         };

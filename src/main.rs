@@ -103,7 +103,8 @@ fn draw(out: &mut Stdout, screen: &Screen, height: u16) -> io::Result<()> {
             MoveTo(0, y),
             SetAttribute(Attribute::Reverse),
             Print(&screen.status),
-            SetAttribute(Attribute::NoReverse)
+            SetAttribute(Attribute::NoReverse),
+            Clear(ClearType::UntilNewLine)
         )?;
         y += 1;
     }

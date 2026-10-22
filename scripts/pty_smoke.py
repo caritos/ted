@@ -601,6 +601,41 @@ finally:
             pass
     shutil.rmtree(lp, ignore_errors=True)
 
+# 18. tab stops: a tab draws spaces up to the next multiple of 4. The gutter
+# is on by default, so rows read `  1 a   b` and `  2     x` (style escapes
+# stripped first, as in 17).
+tp = tempfile.mkdtemp(prefix="ted-smoke-tabs-")
+pid = fd = None
+try:
+    p = os.path.join(tp, "t.txt")
+    with open(p, "w") as f:
+        f.write("a\tb\n\tx\nabc\td\n")
+    pid, fd = spawn([p])
+    out = plain(drain(fd))
+    check("tabs: a<tab>b draws `a   b`", b"  1 a   b" in out, out[-300:])
+    check("tabs: leading tab draws 4 spaces", b"  2     x" in out, out[-300:])
+    check("tabs: abc<tab>d draws one space", b"  3 abc d" in out, out[-300:])
+    check("tabs: no tab char reaches the terminal", b"\t" not in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("tabs: exit 0 without changes", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(tp, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

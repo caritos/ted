@@ -22,6 +22,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 ## Log
 ### 2026-10-22
 - Done (unit-tested + pty smoke): open/edit/save file, arrows, Backspace/Delete/Enter/Tab(4 spaces), Ctrl-S, Ctrl-Q with unsaved-changes confirm, scrolling, status bar.
-- Not yet verified by hand in a real terminal app (Terminal/iTerm): look and feel, resize, Option/Alt keys.
+- Confirmed by hand in a real terminal (2026-10-22): save, quit, add text, delete text.
+- Not yet verified by hand: look and feel, resize, Option/Alt keys, unsaved-changes quit warning.
 - Deferred: Home/End, PageUp/Down, undo, search, save-as prompt for unnamed buffers, wide-char (CJK/emoji) cursor alignment, syntax highlighting.
 - History: an earlier SwiftUI Mac app attempt lives at git tag `swift-mac-app`.

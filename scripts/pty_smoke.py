@@ -221,12 +221,12 @@ shutil.rmtree(slow, ignore_errors=True)
 # file, Ctrl-T toggles back to the editor.
 CTRL_T = b"\x14"
 tree = tempfile.mkdtemp(prefix="ted-smoke-tree-")
-pid = None
+pid = fd = None
 try:
     os.mkdir(os.path.join(tree, "sub"))
-    open(os.path.join(tree, "sub", "inner.txt"), "w").write("inner\n")
-    open(os.path.join(tree, "top.txt"), "w").write("hello top\n")
-    open(os.path.join(tree, ".hidden"), "w").write("dot\n")
+    for name, text in (("sub/inner.txt", "inner\n"), ("top.txt", "hello top\n"), (".hidden", "dot\n")):
+        with open(os.path.join(tree, name), "w") as f:
+            f.write(text)
     pid, fd = spawn([tree])
     drain(fd)
     send(fd, CTRL_T)
@@ -235,9 +235,7 @@ try:
     check("tree lists top.txt", b"top.txt" in out, out[-300:])
     check("tree lists collapsed sub/", b"> sub/" in out, out[-300:])
     check("tree shows dotfile", b".hidden" in out, out[-300:])
-    check("tree hides collapsed contents", b"inner.txt" not in out, out[-300:])
-    send(fd, b"\x1b[B")  # Down, then Up: selection starts on sub/ either way
-    send(fd, b"\x1b[A")
+    check("tree hides collapsed contents", b"top.txt" in out and b"inner.txt" not in out, out[-300:])
     send(fd, b"\x1b[C")  # Right expands sub/
     out = drain(fd, 0.5, 2.0)
     check("Right expands sub/", b"v sub/" in out, out[-300:])
@@ -266,6 +264,11 @@ finally:
         try:
             os.kill(pid, 9)
             os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
         except OSError:
             pass
     shutil.rmtree(tree, ignore_errors=True)

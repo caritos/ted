@@ -22,14 +22,14 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Rust comes from rustup via Homebrew; if `cargo` is missing, `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`.
 
 ## Rules
-- TDD: failing test first. Logic goes in the library (`buffer`, `editor`, `git`, `gitview`, `app`) so it is testable without a terminal.
+- TDD: failing test first. Logic goes in the library (`buffer`, `editor`, `git`, `gitview`, `filetree`, `text`, `app`) so it is testable without a terminal.
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
 ### 2026-10-22 (file tree)
 - Done (unit-tested): `FileTree` state machine (expand/collapse, selection, Enter/Left/Right, PageUp/Down, Home/End, unreadable dirs, refresh), rendering with `Style::Dir`, `App` Mode enum with Ctrl-T / Ctrl-G cross-switching.
-- Done (pty smoke): Ctrl-T lists entries and a dotfile, Right expands `sub/`, Enter opens `top.txt`, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. Seen failing with the Ctrl-T handler stubbed out.
-- Not yet verified by hand: colors, resize, a very large directory, symlinked directories in real use.
+- Done (pty smoke, 12 of the 39 checks; cross-switching, refresh, `(cannot read)` and `ted <file>` rooting are unit-tested only): Ctrl-T lists entries and a dotfile, Right expands `sub/`, Enter opens `top.txt`, Ctrl-T twice returns to the editor, Ctrl-Q exits 0. Seen failing with the Ctrl-T handler stubbed out.
+- Not yet verified by hand: colors, resize, the live refresh while another process changes files, Ctrl-G / Ctrl-T cross-switching, a very large directory, symlinked directories in real use.
 - Deferred: sidebar next to the editor, git status marks in the tree, create/rename/delete, filtering/search, hidden-file toggle.
 ### 2026-10-22
 - Done (unit-tested + pty smoke): open/edit/save file, arrows, Backspace/Delete/Enter/Tab(4 spaces), Ctrl-S, Ctrl-Q with unsaved-changes confirm, scrolling, status bar.

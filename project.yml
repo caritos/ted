@@ -1,0 +1,39 @@
+name: TextEditor
+options:
+  bundleIdPrefix: com.caritos
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: 3U8L77G9QV
+    CODE_SIGN_STYLE: Automatic
+packages:
+  TextEditorKit:
+    path: TextEditorKit
+targets:
+  TextEditor:
+    type: application
+    platform: macOS
+    sources:
+      - App
+    dependencies:
+      - package: TextEditorKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.caritos.text-editor
+        PRODUCT_NAME: TextEditor
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_APP_SANDBOX: NO
+        INFOPLIST_KEY_CFBundleDisplayName: TextEditor
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+schemes:
+  TextEditor:
+    build:
+      targets:
+        TextEditor: all
+    run:
+      config: Debug

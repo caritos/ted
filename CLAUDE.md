@@ -20,7 +20,7 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - Rust comes from rustup via Homebrew; if `cargo` is missing, `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`.
 
 ## Rules
-- TDD: failing test first. Logic goes in `buffer`/`editor` so it is testable without a terminal.
+- TDD: failing test first. Logic goes in the library (`buffer`, `editor`, `git`, `gitview`, `app`) so it is testable without a terminal.
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log

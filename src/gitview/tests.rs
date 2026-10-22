@@ -1,6 +1,7 @@
 use super::*;
 use crate::git::fake::FakeGit;
-use crate::git::{ChangeKind, Commit, GitError};use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::git::{ChangeKind, Commit, GitError};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::{Duration, UNIX_EPOCH};
 
 fn key(code: KeyCode) -> KeyEvent {

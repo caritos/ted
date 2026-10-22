@@ -85,7 +85,15 @@ impl App {
     fn cycle(&mut self, forward: bool) {
         let n = self.editors.len();
         self.current = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
+        self.close_picker();
         self.mode = Mode::Editor;
+    }
+
+    /// Closes the changes view's commit picker so nothing stale is waiting on return.
+    fn close_picker(&mut self) {
+        if let Some(view) = &mut self.git_view {
+            view.close_picker();
+        }
     }
 
     /// Closes the current buffer. A modified one needs a second Ctrl-W.
@@ -257,6 +265,7 @@ impl App {
     }
 
     fn enter_buffer_list(&mut self) {
+        self.close_picker();
         match &mut self.buffer_list {
             Some(list) => list.reset(self.current),
             None => self.buffer_list = Some(BufferList::new(self.current)),
@@ -299,10 +308,18 @@ impl App {
     /// A refusal is shown in the view that asked, which stays showing.
     fn open(&mut self, rel: &str) {
         let path = self.location.join(rel);
-        // An already-open file just becomes current; it is not read again.
         if let Some(i) = self.position_of(&path) {
             self.current = i;
             self.mode = Mode::Editor;
+            // A buffer with edits keeps them and is not read again. An
+            // unedited one is refreshed from disk; if that fails the old
+            // copy stays and the error shows in the editor.
+            if !self.editors[i].buffer().is_modified() {
+                match self.load(&path) {
+                    Ok(buffer) => self.editors[i] = Editor::new(buffer),
+                    Err(message) => self.editors[i].set_message(message),
+                }
+            }
             return;
         }
         match self.load(&path) {

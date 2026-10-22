@@ -74,7 +74,7 @@ Files ending in `.rs` are drawn with colors from the terminal's ANSI palette, so
 
 ## Buffers
 
-`ted` holds several files at once. Opening a file from the git view or file tree adds a buffer and switches to it, so unsaved edits in the buffer you were in are never lost or refused. Opening a file that is already open (same file after resolving `./x` and symlinks) switches to it instead of adding a second copy. An unnamed, empty, unmodified buffer is replaced by the first file opened. When more than one buffer is open the status bar shows `[2/3]` after the file name.
+`ted` holds several files at once. Opening a file from the git view or file tree adds a buffer and switches to it, so unsaved edits in the buffer you were in are never lost or refused. Opening a file that is already open (same file after resolving `./x` and symlinks) switches to it instead of adding a second copy; if that buffer has no unsaved edits it is re-read from disk first (so changes made elsewhere show up), and if it has edits they are kept as they are. An unnamed, empty, unmodified buffer is replaced by the first file opened. When more than one buffer is open the status bar shows `[2/3]` after the file name.
 
 Ctrl-O opens the buffer list: one row per buffer (`  1  a.txt`, the current one marked with `>`, ` [+]` when modified), with the selection starting on the current buffer.
 
@@ -125,7 +125,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 285 unit tests
+cargo test                                   # 288 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```
@@ -138,7 +138,7 @@ Verified by hand in a real terminal: save, quit, add text, delete text. Unit tes
 
 ## Not yet
 
-Home/End, PageUp/PageDown, undo, search, tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+Home/End, PageUp/PageDown, undo, search, tab expansion to tab stops (a tab currently shows as one space), a save-as prompt for unnamed buffers, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

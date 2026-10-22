@@ -944,9 +944,10 @@ fn ctrl_n_and_ctrl_p_wrap() {
 }
 
 #[test]
-fn opening_open_file_does_not_reread_it() {
+fn opening_open_modified_file_switches_without_rereading() {
     let dir = Temp::new("multi-noreread");
     let mut app = multi_app(&dir);
+    type_str(&mut app, "X");
     // The open copy is no longer valid UTF-8 on disk; switching must not read it.
     fs::write(dir.0.join("a.txt"), [0xff, 0xfe, 0x00]).unwrap();
     open_from_tree(&mut app, 1);
@@ -954,8 +955,62 @@ fn opening_open_file_does_not_reread_it() {
     assert!(!app.in_file_tree());
     assert_eq!(app.buffer_count(), 2);
     assert_eq!(app.current_index(), 0);
-    assert_eq!(app.editor().buffer().text(), "alpha\nsecond\n");
+    assert_eq!(app.editor().buffer().text(), "Xalpha\nsecond\n");
     assert_eq!(app.screen(80, 6, t(1000)).message, "");
+}
+
+#[test]
+fn opening_open_unmodified_file_rereads_it_from_disk() {
+    let dir = Temp::new("multi-reread");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    fs::write(dir.0.join("a.txt"), "changed\n").unwrap();
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(app.editor().buffer().text(), "changed\n");
+    assert!(!app.editor().buffer().is_modified());
+    // Saving after an edit writes the new text plus the edit.
+    type_str(&mut app, "X");
+    app.handle_key(ctrl('s'), t(1000));
+    assert_eq!(fs::read_to_string(dir.0.join("a.txt")).unwrap(), "Xchanged\n");
+}
+
+#[test]
+fn failed_reread_of_unmodified_open_file_keeps_old_copy_and_shows_error() {
+    let dir = Temp::new("multi-reread-fail");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    fs::write(dir.0.join("a.txt"), [0xff, 0xfe, 0x00]).unwrap();
+    open_from_tree(&mut app, 0);
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 0);
+    assert_eq!(app.editor().buffer().text(), "alpha\nsecond\n");
+    let message = app.screen(80, 6, t(1000)).message;
+    assert!(message.starts_with("Open failed: "), "{message}");
+}
+
+#[test]
+fn ctrl_n_p_o_from_the_changes_view_close_the_picker() {
+    let dir = Temp::new("multi-picker");
+    let mut app = multi_app(&dir);
+    open_from_tree(&mut app, 1);
+    let mut fake = one_file();
+    fake.log = vec![Commit {
+        hash: "c1".to_string(),
+        short: "c1".to_string(),
+        subject: "first".to_string(),
+        unix_time: 900,
+        refs: Vec::new(),
+    }];
+    app.git = Box::new(fake);
+    for leave in [ctrl('n'), ctrl('p'), ctrl('o')] {
+        app.handle_key(ctrl('g'), t(1000));
+        app.handle_key(ch('b'), t(1000));
+        assert!(app.git_view.as_ref().unwrap().picker_open());
+        app.handle_key(leave, t(1000));
+        assert!(!app.git_view.as_ref().unwrap().picker_open());
+    }
 }
 
 #[test]

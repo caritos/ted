@@ -403,6 +403,10 @@ impl GitView {
         self.diff_scroll
     }
 
+    pub fn close_picker(&mut self) {
+        self.picker = None;
+    }
+
     #[cfg(test)]
     pub(crate) fn picker_open(&self) -> bool {
         self.picker.is_some()

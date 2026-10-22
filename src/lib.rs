@@ -4,5 +4,6 @@ pub mod editor;
 pub mod filetree;
 pub mod git;
 pub mod gitview;
+pub mod highlight;
 pub mod screen;
 pub(crate) mod text;

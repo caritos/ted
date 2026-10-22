@@ -1,25 +1,30 @@
 use std::io::{self, Stdout, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime};
 
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::style::{Attribute, Print, SetAttribute};
+use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
     enable_raw_mode,
 };
 use crossterm::{execute, queue};
 
+use ted::app::App;
 use ted::buffer::Buffer;
-use ted::editor::{Editor, Flow, View};
+use ted::editor::{Editor, Flow};
+use ted::git::GitCli;
+use ted::screen::{Screen, Style};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let buffer = match args.as_slice() {
-        [] => Buffer::new(),
+    let (buffer, location) = match args.as_slice() {
+        [] => (Buffer::new(), PathBuf::from(".")),
+        [path] if Path::new(path).is_dir() => (Buffer::new(), PathBuf::from(path)),
         [path] => match Buffer::open(Path::new(path)) {
-            Ok(buffer) => buffer,
+            Ok(buffer) => (buffer, parent_of(Path::new(path))),
             Err(e) => {
                 eprintln!("ted: {path}: {e}");
                 return ExitCode::FAILURE;
@@ -31,7 +36,9 @@ fn main() -> ExitCode {
         }
     };
 
-    match run(Editor::new(buffer)) {
+    let source = GitCli::new(location.clone());
+    let app = App::new(Editor::new(buffer), location, Box::new(source));
+    match run(app) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("ted: {e}");
@@ -40,29 +47,54 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(mut editor: Editor) -> io::Result<()> {
+/// The directory containing `path`, or `.` when it has none.
+fn parent_of(path: &Path) -> PathBuf {
+    match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
+fn run(mut app: App) -> io::Result<()> {
     let _terminal = TerminalGuard::enter()?;
     let mut out = io::stdout();
+    let mut drawn: Option<(Screen, (u16, u16))> = None;
     loop {
-        let (width, height) = terminal::size()?;
-        let view = editor.view(width as usize, height as usize);
-        draw(&mut out, &view, height)?;
+        let size = terminal::size()?;
+        let screen = app.screen(size.0 as usize, size.1 as usize, SystemTime::now());
+        if drawn.as_ref().is_none_or(|(s, sz)| *s != screen || *sz != size) {
+            draw(&mut out, &screen, size.1)?;
+            drawn = Some((screen, size));
+        }
 
-        // Anything other than a key press (including a resize) just redraws.
-        if let Event::Key(key) = event::read()?
-            && key.kind != KeyEventKind::Release
-            && editor.handle_key(key) == Flow::Quit
-        {
-            return Ok(());
+        if event::poll(Duration::from_millis(1000))? {
+            // Anything other than a key press (including a resize) just redraws.
+            if let Event::Key(key) = event::read()?
+                && key.kind != KeyEventKind::Release
+                && app.handle_key(key, SystemTime::now()) == Flow::Quit
+            {
+                return Ok(());
+            }
+        } else {
+            app.tick(SystemTime::now());
         }
     }
 }
 
-fn draw(out: &mut Stdout, view: &View, height: u16) -> io::Result<()> {
+fn draw(out: &mut Stdout, screen: &Screen, height: u16) -> io::Result<()> {
     queue!(out, Hide)?;
     let mut y: u16 = 0;
-    for line in &view.lines {
-        queue!(out, MoveTo(0, y), Print(line), Clear(ClearType::UntilNewLine))?;
+    for row in &screen.rows {
+        if y >= height {
+            break;
+        }
+        queue!(out, MoveTo(0, y))?;
+        for span in row {
+            set_style(out, span.style)?;
+            queue!(out, Print(&span.text))?;
+            queue!(out, SetAttribute(Attribute::Reset), ResetColor)?;
+        }
+        queue!(out, Clear(ClearType::UntilNewLine))?;
         y += 1;
     }
     if y < height {
@@ -70,17 +102,31 @@ fn draw(out: &mut Stdout, view: &View, height: u16) -> io::Result<()> {
             out,
             MoveTo(0, y),
             SetAttribute(Attribute::Reverse),
-            Print(&view.status),
+            Print(&screen.status),
             SetAttribute(Attribute::NoReverse)
         )?;
         y += 1;
     }
     if y < height {
-        queue!(out, MoveTo(0, y), Print(&view.message), Clear(ClearType::UntilNewLine))?;
+        queue!(out, MoveTo(0, y), Print(&screen.message), Clear(ClearType::UntilNewLine))?;
     }
-    let (row, col) = view.cursor;
-    queue!(out, MoveTo(col as u16, row as u16), Show)?;
+    if let Some((row, col)) = screen.cursor
+        && let (Ok(row), Ok(col)) = (u16::try_from(row), u16::try_from(col))
+    {
+        queue!(out, MoveTo(col, row), Show)?;
+    }
     out.flush()
+}
+
+fn set_style(out: &mut Stdout, style: Style) -> io::Result<()> {
+    match style {
+        Style::Normal => Ok(()),
+        Style::Selected => queue!(out, SetAttribute(Attribute::Reverse)),
+        Style::Added => queue!(out, SetForegroundColor(Color::Green)),
+        Style::Removed => queue!(out, SetForegroundColor(Color::Red)),
+        Style::Hunk => queue!(out, SetForegroundColor(Color::Cyan)),
+        Style::Dim => queue!(out, SetAttribute(Attribute::Dim)),
+    }
 }
 
 /// Puts the terminal in raw mode on the alternate screen and restores it on

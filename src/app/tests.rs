@@ -464,6 +464,48 @@ fn ctrl_g_in_tree_switches_to_git_view_and_ctrl_t_in_git_view_switches_to_tree()
 }
 
 #[test]
+fn ctrl_t_from_git_view_leaves_no_stale_message_or_open_picker() {
+    let dir = Temp::new("tree-git-stale");
+    dir.file("a.txt", "x");
+    let mut git = one_file();
+    git.log = vec![Commit {
+        hash: "c1".to_string(),
+        short: "c1".to_string(),
+        subject: "first".to_string(),
+        unix_time: 900,
+        refs: Vec::new(),
+    }];
+
+    // An armed quit warning does not survive git -> tree -> git.
+    let mut app = app_with(Editor::new(Buffer::new()), dir.0.clone(), git);
+    type_str(&mut app, "x");
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(ctrl('q'), t(1000));
+    assert!(app.screen(80, 6, t(1000)).message.contains("Unsaved"));
+    app.handle_key(ctrl('t'), t(1000));
+    assert!(app.in_file_tree());
+    app.handle_key(ctrl('g'), t(1000));
+    assert!(app.in_git_view());
+    assert_eq!(app.screen(80, 6, t(1000)).message, "");
+
+    // A refusal message does not survive it either.
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert_eq!(app.screen(80, 6, t(1000)).message, "Unsaved changes: save or quit first");
+    app.handle_key(ctrl('t'), t(1000));
+    app.handle_key(ctrl('g'), t(1000));
+    assert_eq!(app.screen(80, 6, t(1000)).message, "");
+
+    // An open picker is closed on return.
+    app.handle_key(ch('b'), t(1000));
+    assert!(app.git_view.as_ref().unwrap().picker_open());
+    app.handle_key(ctrl('t'), t(1000));
+    assert!(app.in_file_tree());
+    app.handle_key(ctrl('g'), t(1000));
+    assert!(app.in_git_view());
+    assert!(!app.git_view.as_ref().unwrap().picker_open());
+}
+
+#[test]
 fn tree_keeps_expansion_and_selection_between_visits() {
     let dir = Temp::new("tree-keep");
     dir.file("sub/inner.txt", "inner\n");

@@ -304,6 +304,24 @@ fn ctrl_g_backs_out_like_esc() {
 }
 
 #[test]
+fn ctrl_t_closes_picker_clears_message_and_asks_for_the_tree() {
+    let ctrl_t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
+    let mut git = FakeGit::new();
+    git.log = vec![commit("c1", "first")];
+    let mut view = refreshed(&git);
+    view.handle_key(ch('b'), &git, t(1000));
+    view.set_message("stale".to_string());
+    assert_eq!(view.handle_key(ctrl_t, &git, t(1000)), GitAction::ToggleTree);
+    assert!(!view.picker_open());
+    assert_eq!(view.message(), "");
+
+    // Without a picker too.
+    view.set_message("stale".to_string());
+    assert_eq!(view.handle_key(ctrl_t, &git, t(1000)), GitAction::ToggleTree);
+    assert_eq!(view.message(), "");
+}
+
+#[test]
 fn empty_log_picker_shows_message_and_closes_on_esc() {
     let mut git = FakeGit::new();
     git.head = Baseline::Empty;

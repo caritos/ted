@@ -80,10 +80,6 @@ impl App {
         match self.mode {
             Mode::Editor => {}
             Mode::GitView => {
-                if ctrl && key.code == KeyCode::Char('t') {
-                    self.enter_file_tree();
-                    return Flow::Continue;
-                }
                 let Some(view) = &mut self.git_view else {
                     self.mode = Mode::Editor;
                     return Flow::Continue;
@@ -91,6 +87,7 @@ impl App {
                 match view.handle_key(key, self.git.as_ref(), now) {
                     GitAction::None => {}
                     GitAction::Back => self.mode = Mode::Editor,
+                    GitAction::ToggleTree => self.enter_file_tree(),
                     GitAction::Open(rel) => self.open(&rel),
                 }
             }

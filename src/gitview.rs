@@ -19,6 +19,8 @@ pub enum GitAction {
     None,
     /// Leave the git view.
     Back,
+    /// Leave the git view for the file tree (Ctrl-T).
+    ToggleTree,
     /// Open this path, relative to the location, in the editor.
     Open(String),
 }
@@ -135,6 +137,12 @@ impl GitView {
 
     pub fn handle_key(&mut self, key: KeyEvent, git: &dyn Git, now: SystemTime) -> GitAction {
         self.message.clear();
+        // Ctrl-T leaves for the tree from anywhere, closing the picker so
+        // nothing stale is waiting on return.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
+            self.picker = None;
+            return GitAction::ToggleTree;
+        }
         // Ctrl-G toggles the git view, so it backs out one level like Esc.
         let key = if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g')
         {

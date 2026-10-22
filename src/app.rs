@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
 use crate::bufferlist::{BufferList, ListAction};
+use crate::command::{self, Command};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
 use crate::git::Git;
@@ -206,7 +207,8 @@ impl App {
         // are text or ignored there instead of their global action.
         if self.mode == Mode::Editor && self.editor().in_prompt() {
             self.close_armed = false;
-            return self.editor_mut().handle_key(key);
+            let flow = self.editor_mut().handle_key(key);
+            return self.finish_key(flow, now);
         }
         let is_close = ctrl && key.code == KeyCode::Char('w');
         // Any key but Ctrl-W withdraws a pending close warning.
@@ -247,7 +249,8 @@ impl App {
                 self.line_numbers = !self.line_numbers;
                 return Flow::Continue;
             }
-            return self.editor_mut().handle_key(key);
+            let flow = self.editor_mut().handle_key(key);
+            return self.finish_key(flow, now);
         }
 
         match self.mode {
@@ -302,6 +305,50 @@ impl App {
                     self.enter_file_tree();
                 }
             },
+        }
+        Flow::Continue
+    }
+
+    /// After the editor handled a key: runs the command the key accepted, if any.
+    fn finish_key(&mut self, flow: Flow, now: SystemTime) -> Flow {
+        match self.editor_mut().take_command() {
+            Some(text) => self.run_command(&text, now),
+            None => flow,
+        }
+    }
+
+    /// Runs a command typed in the Ctrl-X prompt; each does what its key does.
+    /// A parse error becomes the current editor's message.
+    pub fn run_command(&mut self, text: &str, now: SystemTime) -> Flow {
+        let command = match command::parse(text) {
+            Ok(command) => command,
+            Err(message) => {
+                if !message.is_empty() {
+                    self.editor_mut().set_message(message);
+                }
+                return Flow::Continue;
+            }
+        };
+        match command {
+            Command::Save => self.editor_mut().save(),
+            Command::Goto(n) => self.editor_mut().go_to_line(n),
+            Command::Lines(setting) => self.line_numbers = setting.unwrap_or(!self.line_numbers),
+            Command::Next => self.cycle(true),
+            Command::Prev => self.cycle(false),
+            Command::Close => self.close_current(),
+            Command::Buffers => self.enter_buffer_list(),
+            Command::Tree => self.enter_file_tree(),
+            Command::Git => self.enter_git_view(now),
+            Command::Help => self.enter_help(),
+            Command::Quit => return self.quit(),
+            Command::WriteQuit => {
+                self.editor_mut().save();
+                // A missing file name or a failed save leaves the buffer (and
+                // its message) as it is, and ted stays open.
+                if self.editor().buffer().path().is_some() && !self.editor().buffer().is_modified() {
+                    return self.quit();
+                }
+            }
         }
         Flow::Continue
     }

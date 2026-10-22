@@ -473,7 +473,12 @@ impl Editor {
         rows
     }
 
-    fn save(&mut self) {
+    /// Moves to column 0 of the 1-based `n`, clamped to the buffer.
+    pub fn go_to_line(&mut self, n: usize) {
+        self.buffer.go_to_line(n);
+    }
+
+    pub fn save(&mut self) {
         if self.buffer.path().is_none() {
             self.message = "No file name: start ted with a path to save.".to_string();
             return;

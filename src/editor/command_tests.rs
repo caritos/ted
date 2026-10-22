@@ -118,7 +118,29 @@ fn tab_with_several_matches_completes_the_common_prefix() {
     let mut e = open("x");
     type_str(&mut e, "g");
     e.handle_key(key(KeyCode::Tab));
-    assert!(e.view(60, 5).message.starts_with("Command: g_"));
+    assert_eq!(e.view(60, 5).message, "Command: g_  goto git");
+}
+
+#[test]
+fn message_row_is_clear_after_enter_or_esc_and_other_prompts_work() {
+    for finish in [KeyCode::Enter, KeyCode::Esc] {
+        let mut e = open("alpha\nbeta\ngamma");
+        type_str(&mut e, "goto 2");
+        e.handle_key(key(finish));
+        assert!(!e.in_prompt());
+        assert_eq!(e.view(60, 5).message, "", "{finish:?}");
+        e.handle_key(ctrl('f'));
+        type_str(&mut e, "gam");
+        assert_eq!(e.view(60, 5).message, "Find: gam_");
+        e.handle_key(key(KeyCode::Enter));
+        assert_eq!(e.buffer().cursor(), (2, 0));
+        e.handle_key(ctrl('l'));
+        assert!(e.view(60, 5).message.starts_with("Go to line"), "{:?}", e.view(60, 5).message);
+        type_str(&mut e, "1");
+        e.handle_key(key(KeyCode::Enter));
+        assert_eq!(e.buffer().cursor(), (0, 0));
+        assert_eq!(e.view(60, 5).message, "");
+    }
 }
 
 #[test]

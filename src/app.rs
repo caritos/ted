@@ -203,18 +203,29 @@ impl App {
     }
 }
 
-/// The editor's frame as a `Screen`: one plain span per row.
+/// The editor's frame as a `Screen`: consecutive chars of one style share a
+/// span, so a plain row is exactly one `Normal` span.
 fn editor_screen(view: View) -> Screen {
     Screen {
-        rows: view
-            .lines
-            .into_iter()
-            .map(|text| vec![Span { text, style: Style::Normal }])
-            .collect(),
+        rows: view.lines.iter().zip(&view.styles).map(|(text, styles)| spans(text, styles)).collect(),
         status: view.status,
         message: view.message,
         cursor: Some(view.cursor),
     }
+}
+
+fn spans(text: &str, styles: &[Style]) -> Vec<Span> {
+    let mut row: Vec<Span> = Vec::new();
+    for (c, &style) in text.chars().zip(styles) {
+        match row.last_mut() {
+            Some(span) if span.style == style => span.text.push(c),
+            _ => row.push(Span { text: c.to_string(), style }),
+        }
+    }
+    if row.is_empty() {
+        row.push(Span { text: String::new(), style: Style::Normal });
+    }
+    row
 }
 
 #[cfg(test)]

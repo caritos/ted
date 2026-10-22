@@ -768,3 +768,22 @@ fn enter_on_file_over_64_mib_in_tree_is_refused_as_too_large() {
     assert_eq!(text, "keep");
     assert!(no_path);
 }
+
+#[test]
+fn app_groups_equal_styles_into_spans_and_keeps_text_identical() {
+    let dir = temp_dir("spans");
+    let path = dir.join("a.rs");
+    fs::write(&path, "fn a() {} // hi\nplain\n").unwrap();
+    let editor = Editor::new(Buffer::open(&path).unwrap());
+    let mut app = app_with(editor, dir, one_file());
+    let screen = app.screen(30, 6, t(1000));
+    assert_eq!(row_text(&screen, 0), "fn a() {} // hi");
+    let spans: Vec<(&str, Style)> =
+        screen.rows[0].iter().map(|s| (s.text.as_str(), s.style)).collect();
+    assert_eq!(
+        spans,
+        vec![("fn", Style::Keyword), (" a() {} ", Style::Normal), ("// hi", Style::Comment)]
+    );
+    assert_eq!(screen.rows[1], vec![Span { text: "plain".into(), style: Style::Normal }]);
+    assert_eq!(screen.rows[3], vec![Span { text: "~".into(), style: Style::Normal }]);
+}

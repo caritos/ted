@@ -1,6 +1,7 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
+use crate::screen::Style;
 use std::path::PathBuf;
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -260,4 +261,106 @@ fn cancel_quit_disarms_the_warning() {
     assert_eq!(e.message(), "");
     assert_eq!(e.handle_key(ctrl('q')), Flow::Continue);
     assert_eq!(e.handle_key(ctrl('q')), Flow::Quit);
+}
+
+fn named_editor(name: &str, text: &str) -> Editor {
+    let dir = temp_file(name).parent().unwrap().to_path_buf();
+    let path = dir.join(name);
+    fs::write(&path, text).unwrap();
+    Editor::new(Buffer::open(&path).unwrap())
+}
+
+fn assert_aligned(v: &View) {
+    assert_eq!(v.styles.len(), v.lines.len());
+    for (line, styles) in v.lines.iter().zip(&v.styles) {
+        assert_eq!(line.chars().count(), styles.len(), "line {line:?}");
+    }
+}
+
+#[test]
+fn editor_view_styles_have_one_entry_per_displayed_char() {
+    let src = "fn main() {\n    let s = \"héllo 😀 日本語 text\"; // done\n}\n/* open\nstill */ let x = 1;\n";
+    for name in ["a.rs", "a.txt"] {
+        for width in 0..40 {
+            for height in 0..6 {
+                let mut e = named_editor(name, src);
+                let v = e.view(width, height);
+                assert_aligned(&v);
+                for _ in 0..30 {
+                    e.handle_key(key(KeyCode::Right));
+                }
+                for _ in 0..3 {
+                    e.handle_key(key(KeyCode::Down));
+                }
+                let v = e.view(width, height);
+                assert_aligned(&v);
+            }
+        }
+    }
+}
+
+#[test]
+fn rust_buffer_styles_mark_keywords_strings_and_comments() {
+    let mut e = named_editor("a.rs", "fn x() { \"s\" } // c\n");
+    let v = e.view(40, 6);
+    assert_eq!(v.lines[0], "fn x() { \"s\" } // c");
+    let s = &v.styles[0];
+    assert_eq!(s[0], Style::Keyword);
+    assert_eq!(s[1], Style::Keyword);
+    assert_eq!(s[2], Style::Normal);
+    assert_eq!(s[3], Style::Normal);
+    assert_eq!(s[9], Style::Str);
+    assert_eq!(s[11], Style::Str);
+    assert_eq!(s[16], Style::Comment);
+    assert_eq!(s[18], Style::Comment);
+    assert_eq!(v.lines[2], "~");
+    assert_eq!(v.styles[2], vec![Style::Normal]);
+}
+
+#[test]
+fn scrolling_in_the_middle_of_a_string_keeps_styles_aligned() {
+    let mut e = named_editor("a.rs", "let a = \"0123456789\"; // tail\n");
+    for _ in 0..24 {
+        e.handle_key(key(KeyCode::Right));
+    }
+    let v = e.view(10, 3);
+    assert_aligned(&v);
+    assert_eq!(v.lines[0], "6789\"; // ");
+    assert_eq!(&v.styles[0][..5], &[Style::Str; 5]);
+    assert_eq!(v.styles[0][5], Style::Normal);
+    assert_eq!(v.styles[0][8], Style::Comment);
+}
+
+#[test]
+fn non_rust_and_unnamed_buffers_are_all_normal() {
+    let mut e = named_editor("a.txt", "fn x() // c\n");
+    let v = e.view(20, 4);
+    assert!(v.styles.iter().flatten().all(|s| *s == Style::Normal));
+    let mut e = Editor::new(Buffer::from_text("fn x() // c\n"));
+    let v = e.view(20, 4);
+    assert_aligned(&v);
+    assert!(v.styles.iter().flatten().all(|s| *s == Style::Normal));
+}
+
+#[test]
+fn multiline_block_comment_state_carries_into_visible_rows_when_scrolled_down() {
+    let mut text = String::from("/* start\n");
+    for _ in 0..10 {
+        text.push_str("let x = 1;\n");
+    }
+    text.push_str("end */ let y;\n");
+    let mut e = named_editor("a.rs", &text);
+    for _ in 0..8 {
+        e.handle_key(key(KeyCode::Down));
+    }
+    let v = e.view(30, 5);
+    assert!(v.styles[0].iter().all(|s| *s == Style::Comment));
+    for _ in 0..3 {
+        e.handle_key(key(KeyCode::Down));
+    }
+    let v = e.view(30, 5);
+    let last = v.lines.iter().position(|l| l.starts_with("end */")).unwrap();
+    assert_eq!(v.styles[last][0], Style::Comment);
+    assert_eq!(v.styles[last][5], Style::Comment);
+    assert_eq!(v.styles[last][7], Style::Keyword);
 }

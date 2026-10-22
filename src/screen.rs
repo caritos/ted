@@ -9,6 +9,12 @@ pub enum Style {
     Hunk,
     Dim,
     Dir,
+    Keyword,
+    TypeName,
+    Str,
+    Comment,
+    Number,
+    Meta,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

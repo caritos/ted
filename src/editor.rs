@@ -1,6 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
+use crate::highlight::{highlight_line, Language, LineState, Token};
+use crate::screen::Style;
 
 const TAB_WIDTH: usize = 4;
 
@@ -15,6 +17,8 @@ pub enum Flow {
 pub struct View {
     /// Exactly the visible text rows, already clipped to the width.
     pub lines: Vec<String>,
+    /// One style per char of each entry of `lines`.
+    pub styles: Vec<Vec<Style>>,
     pub status: String,
     pub message: String,
     /// Cursor position on screen as (row, column) within `lines`.
@@ -121,7 +125,7 @@ impl Editor {
             }
         }
 
-        let lines = (0..text_rows)
+        let lines: Vec<String> = (0..text_rows)
             .map(|i| {
                 let r = self.scroll_row + i;
                 if r < self.buffer.line_count() {
@@ -131,13 +135,42 @@ impl Editor {
                 }
             })
             .collect();
+        let styles = self.styles(&lines, width);
 
         View {
             lines,
+            styles,
             status: self.status_line(width),
             message: clip(&self.message, 0, width),
             cursor: (row - self.scroll_row, col - self.scroll_col),
         }
+    }
+
+    /// One style per displayed char of `lines` (the clipped visible rows).
+    /// Highlighted languages are tokenized from line 0 so multi-line state
+    /// (block comments, strings) is right at the top of the viewport.
+    fn styles(&self, lines: &[String], width: usize) -> Vec<Vec<Style>> {
+        let language = self.buffer.path().and_then(Language::from_path);
+        let Some(language) = language.filter(|_| !lines.is_empty()) else {
+            return lines.iter().map(|l| vec![Style::Normal; l.chars().count()]).collect();
+        };
+        let mut state = LineState::default();
+        for r in 0..self.scroll_row {
+            state = highlight_line(language, state, &self.buffer.line(r)).1;
+        }
+        lines
+            .iter()
+            .enumerate()
+            .map(|(i, text)| {
+                let r = self.scroll_row + i;
+                if r >= self.buffer.line_count() {
+                    return vec![Style::Normal; text.chars().count()];
+                }
+                let (tokens, next) = highlight_line(language, state, &self.buffer.line(r));
+                state = next;
+                tokens.iter().skip(self.scroll_col).take(width).map(|t| token_style(*t)).collect()
+            })
+            .collect()
     }
 
     fn save(&mut self) {
@@ -173,6 +206,18 @@ impl Editor {
         status.extend(std::iter::repeat_n(' ', pad));
         status.push_str(&right);
         status
+    }
+}
+
+fn token_style(token: Token) -> Style {
+    match token {
+        Token::Plain => Style::Normal,
+        Token::Keyword => Style::Keyword,
+        Token::Type => Style::TypeName,
+        Token::Str => Style::Str,
+        Token::Comment => Style::Comment,
+        Token::Number => Style::Number,
+        Token::Meta => Style::Meta,
     }
 }
 

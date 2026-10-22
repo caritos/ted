@@ -137,6 +137,12 @@ fn set_style(out: &mut Stdout, style: Style) -> io::Result<()> {
         Style::Removed => queue!(out, SetForegroundColor(Color::Red)),
         Style::Hunk => queue!(out, SetForegroundColor(Color::Cyan)),
         Style::Dim => queue!(out, SetAttribute(Attribute::Dim)),
+        Style::Keyword => queue!(out, SetForegroundColor(Color::Magenta)),
+        Style::TypeName => queue!(out, SetForegroundColor(Color::Yellow)),
+        Style::Str => queue!(out, SetForegroundColor(Color::Green)),
+        Style::Comment => queue!(out, SetForegroundColor(Color::DarkGrey)),
+        Style::Number => queue!(out, SetForegroundColor(Color::Cyan)),
+        Style::Meta => queue!(out, SetForegroundColor(Color::Blue)),
         Style::Dir => {
             queue!(out, SetAttribute(Attribute::Bold), SetForegroundColor(Color::Blue))
         }

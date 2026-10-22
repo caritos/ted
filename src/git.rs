@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -323,11 +324,8 @@ impl Git for GitCli {
         )?;
         let untracked = self.run_text(&["ls-files", "--others", "--exclude-standard", "-z"], &[])?;
         let mut changes = parse_name_status_z(&tracked);
-        for change in parse_untracked_z(&untracked) {
-            if !changes.iter().any(|c| c.path == change.path) {
-                changes.push(change);
-            }
-        }
+        let tracked: HashSet<String> = changes.iter().map(|c| c.path.clone()).collect();
+        changes.extend(parse_untracked_z(&untracked).into_iter().filter(|c| !tracked.contains(&c.path)));
         Ok(changes)
     }
 

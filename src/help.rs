@@ -88,6 +88,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Ctrl-G", "Changes view (again: back)"),
             ("Ctrl-T", "File tree (again: back)"),
+            ("Ctrl-E", "Open a file by name (fuzzy finder)"),
             ("Ctrl-O", "Buffer list"),
             ("Ctrl-N / Ctrl-P", "Next / previous buffer"),
             ("Ctrl-W", "Close the buffer (editor only; twice if unsaved)"),
@@ -104,6 +105,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("r", "Changes view: reset the baseline"),
             ("b", "Pick a baseline commit (Enter picks, Esc closes)"),
             ("q / Esc", "Back to the editor"),
+            ("File finder", "Type to filter, Enter opens, Esc back"),
             ("?", "Show this help"),
         ],
     ),

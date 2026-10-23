@@ -5,6 +5,8 @@ pub mod clipboard;
 pub mod command;
 pub mod editor;
 pub mod filetree;
+pub mod finder;
+pub mod fuzzy;
 pub mod git;
 pub mod gitview;
 pub mod help;

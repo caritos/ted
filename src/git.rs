@@ -156,6 +156,12 @@ pub trait Git {
     fn log(&self, limit: usize) -> Result<Vec<Commit>, GitError>;
     /// Mtime of the working-tree file, `None` if it does not exist.
     fn modified(&self, path: &str) -> Option<SystemTime>;
+    /// Tracked and untracked files that are not ignored, scoped to the
+    /// location with paths relative to it, sorted. `NotARepo` outside a repo
+    /// (also the default, for implementations that cannot list).
+    fn files(&self) -> Result<Vec<String>, GitError> {
+        Err(GitError::NotARepo)
+    }
 }
 
 /// Output of a command whose stdout was read only up to a cap.
@@ -374,6 +380,15 @@ impl Git for GitCli {
 
     fn modified(&self, path: &str) -> Option<SystemTime> {
         std::fs::metadata(self.dir.join(path)).ok()?.modified().ok()
+    }
+
+    fn files(&self) -> Result<Vec<String>, GitError> {
+        // `-z` keeps odd names whole; without it git quotes them.
+        let out = self.run_text(&["ls-files", "-z", "--cached", "--others", "--exclude-standard"], &[])?;
+        let mut files: Vec<String> = out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect();
+        files.sort();
+        files.dedup();
+        Ok(files)
     }
 }
 

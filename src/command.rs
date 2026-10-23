@@ -2,9 +2,9 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 20] = [
+pub const NAMES: [&str; 21] = [
     "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "replace", "qreplace",
-    "copy", "cut", "paste", "selectall", "quit",
+    "copy", "cut", "paste", "selectall", "open", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,8 @@ pub enum Command {
     Cut,
     Paste,
     SelectAll,
+    /// Open a file by name (the fuzzy finder).
+    OpenFile,
     Quit,
     WriteQuit,
 }
@@ -110,6 +112,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "cut" => plain(Command::Cut),
         "paste" => plain(Command::Paste),
         "selectall" => plain(Command::SelectAll),
+        "open" => plain(Command::OpenFile),
         "quit" => plain(Command::Quit),
         "wq" => plain(Command::WriteQuit),
         // The path keeps its case and inner spaces.

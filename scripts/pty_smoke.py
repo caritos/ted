@@ -1059,6 +1059,65 @@ send(fd, CTRL_Q)
 drain(fd)
 check("words: exit 0", wait_exit(pid) == 0)
 
+# 27. open file by name: Ctrl-E in a directory that is not a repository lists
+# the files (hidden ones left out), typing ranks them, Enter opens the match,
+# Ctrl-E then Esc comes back.
+CTRL_E = b"\x05"
+fp = tempfile.mkdtemp(prefix="ted-smoke-finder-")
+pid = fd = None
+try:
+    os.makedirs(os.path.join(fp, "src"))
+    with open(os.path.join(fp, "alpha.txt"), "w") as f:
+        f.write("alpha text\n")
+    with open(os.path.join(fp, "src", "beta.rs"), "w") as f:
+        f.write("fn beta() {}\n")
+    with open(os.path.join(fp, ".hidden"), "w") as f:
+        f.write("h\n")
+    pid, fd = spawn([], cwd=fp)
+    drain(fd)
+    send(fd, CTRL_E)
+    raw = drain(fd)
+    out = plain(raw)
+    check("finder: Ctrl-E lists the files", b"alpha.txt" in out and b"src/beta.rs" in out and b".hidden" not in out, out[-300:])
+    check("finder: status counts them and the query row is shown", b"Open file: 2 of 2 files" in out and b"Open: _" in out, out[-300:])
+    check("finder: the selected row is reverse video", b"\x1b[7m  alpha.txt" in raw, raw[-300:])
+    for c in b"bet":
+        send(fd, bytes([c]))
+    out = plain(drain(fd))
+    check("finder: typing filters", b"Open file: 1 of 2 files" in out and b"Open: bet_" in out, out[-300:])
+    send(fd, b"\r")
+    out = plain(drain(fd))
+    check("finder: Enter opens the file", b"fn beta() {}" in out and b"beta.rs" in out, out[-300:])
+    send(fd, CTRL_E)
+    drain(fd)
+    send(fd, ESC)
+    out = plain(drain(fd))
+    check("finder: Esc returns to the editor", b"Open: " not in out or b"fn beta() {}" in out, out[-300:])
+    send(fd, CTRL_E)
+    out = plain(drain(fd))
+    check("finder: a second visit starts with an empty query", b"Open: _" in out, out[-300:])
+    send(fd, CTRL_E)
+    drain(fd)
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("finder: exit 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(fp, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

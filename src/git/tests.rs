@@ -487,3 +487,47 @@ fn modified_returns_none_for_missing_file() {
     assert!(git.modified("a").is_some());
     assert_eq!(git.modified("nope"), None);
 }
+
+#[test]
+fn files_lists_tracked_and_untracked_but_not_ignored_files() {
+    let t = temp_repo("files-list");
+    t.write(".gitignore", "*.log\nout/\n");
+    t.write("a.txt", "1\n");
+    t.write("sub/b.txt", "1\n");
+    t.write("my file.txt", "1\n");
+    t.commit_all("first");
+    t.write("new.txt", "1\n");
+    t.write("sub/deeper/c.txt", "1\n");
+    t.write("junk.log", "1\n");
+    t.write("out/x", "1\n");
+    let files = GitCli::new(t.path()).files().unwrap();
+    assert_eq!(files, [".gitignore", "a.txt", "my file.txt", "new.txt", "sub/b.txt", "sub/deeper/c.txt"]);
+}
+
+#[test]
+fn files_is_scoped_to_the_directory_and_relative_to_it() {
+    let t = temp_repo("files-scope");
+    t.write("top.txt", "1\n");
+    t.write("sub/in.txt", "1\n");
+    t.commit_all("first");
+    assert_eq!(GitCli::new(t.path().join("sub")).files().unwrap(), ["in.txt"]);
+}
+
+#[test]
+fn files_in_a_repo_without_commits_and_outside_a_repo() {
+    let t = temp_repo("files-empty");
+    t.write("a.txt", "1\n");
+    assert_eq!(GitCli::new(t.path()).files().unwrap(), ["a.txt"]);
+    let t = TempDir::new("files-not-repo");
+    assert_eq!(GitCli::new(t.path()).files(), Err(GitError::NotARepo));
+}
+
+#[test]
+fn files_keeps_unusual_names_whole() {
+    let t = temp_repo("files-names");
+    t.write("caf\u{e9} \"q\".txt", "1\n");
+    t.write("tab\there.txt", "1\n");
+    t.commit_all("first");
+    let files = GitCli::new(t.path()).files().unwrap();
+    assert_eq!(files, ["caf\u{e9} \"q\".txt", "tab\there.txt"]);
+}

@@ -22,6 +22,8 @@ pub(crate) struct FakeGit {
     pub existing: bool,
     /// Paths passed to `diff`, in call order.
     pub diff_calls: RefCell<Vec<String>>,
+    /// What `files` returns; `None` is `NotARepo` (the trait default).
+    pub files: Option<Vec<String>>,
 }
 
 impl FakeGit {
@@ -36,6 +38,7 @@ impl FakeGit {
             fail_diff: None,
             existing: true,
             diff_calls: RefCell::new(Vec::new()),
+            files: None,
         }
     }
 
@@ -95,5 +98,10 @@ impl Git for FakeGit {
 
     fn modified(&self, path: &str) -> Option<SystemTime> {
         self.mtimes.get(path).copied()
+    }
+
+    fn files(&self) -> Result<Vec<String>, GitError> {
+        self.check()?;
+        self.files.clone().ok_or(GitError::NotARepo)
     }
 }

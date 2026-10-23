@@ -11,6 +11,7 @@ use crate::clipboard::{Clipboard, ClipboardRead, SystemClipboard};
 use crate::command::{self, Command};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
+use crate::finder::{self, Finder, FinderAction};
 use crate::git::Git;
 use crate::gitview::{GitAction, GitView};
 use crate::help::{Help, HelpAction};
@@ -26,6 +27,7 @@ enum Mode {
     GitView,
     Files,
     Buffers,
+    Finder,
     Help,
 }
 
@@ -44,6 +46,8 @@ pub struct App {
     file_tree: Option<FileTree>,
     /// Created on the first Ctrl-O; reset to the current buffer on each visit.
     buffer_list: Option<BufferList>,
+    /// Created fresh on each Ctrl-E, so the file list is current.
+    finder: Option<Finder>,
     mode: Mode,
     /// Ctrl-W warned about a modified buffer; the next Ctrl-W closes it.
     close_armed: bool,
@@ -93,6 +97,7 @@ impl App {
             git_view: None,
             file_tree: None,
             buffer_list: None,
+            finder: None,
             mode: Mode::Editor,
             close_armed: false,
             quit_armed: false,
@@ -131,6 +136,10 @@ impl App {
 
     pub fn in_buffer_list(&self) -> bool {
         self.mode == Mode::Buffers
+    }
+
+    pub fn in_finder(&self) -> bool {
+        self.mode == Mode::Finder
     }
 
     pub fn editor(&self) -> &Editor {
@@ -270,7 +279,7 @@ impl App {
         }
         let plain = !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         // `?` is text in the editor, so only the views (no text input) take it.
-        let help_key = key.code == KeyCode::F(1) || (plain && key.code == KeyCode::Char('?') && self.mode != Mode::Editor);
+        let help_key = key.code == KeyCode::F(1) || (plain && key.code == KeyCode::Char('?') && !matches!(self.mode, Mode::Editor | Mode::Finder));
         if help_key && self.mode != Mode::Help {
             self.enter_help();
             return Flow::Continue;
@@ -282,6 +291,10 @@ impl App {
             }
             if ctrl && key.code == KeyCode::Char('t') {
                 self.enter_file_tree();
+                return Flow::Continue;
+            }
+            if ctrl && key.code == KeyCode::Char('e') {
+                self.enter_finder();
                 return Flow::Continue;
             }
             if key.code == KeyCode::F(2) {
@@ -343,6 +356,17 @@ impl App {
                     }
                     ListAction::ToggleGit => self.enter_git_view(now),
                     ListAction::ToggleTree => self.enter_file_tree(),
+                }
+            }
+            Mode::Finder => {
+                let Some(finder) = &mut self.finder else {
+                    self.mode = Mode::Editor;
+                    return Flow::Continue;
+                };
+                match finder.handle_key(key) {
+                    FinderAction::None => {}
+                    FinderAction::Back => self.mode = Mode::Editor,
+                    FinderAction::Open(rel) => self.open(&rel),
                 }
             }
             Mode::Help => match self.help.handle_key(key) {
@@ -425,6 +449,12 @@ impl App {
     /// goes into the prompt without line breaks (so it can never run a
     /// command); the views and help ignore it.
     pub fn paste(&mut self, text: &str) {
+        if self.mode == Mode::Finder {
+            if let Some(finder) = &mut self.finder {
+                finder.paste(text);
+            }
+            return;
+        }
         if self.mode != Mode::Editor {
             return;
         }
@@ -482,6 +512,7 @@ impl App {
             Command::Help => self.enter_help(),
             Command::Undo => self.editor_mut().undo(),
             Command::Redo => self.editor_mut().redo(),
+            Command::OpenFile => self.enter_finder(),
             Command::Replace => self.editor_mut().open_replace(),
             Command::ReplaceAsk => self.editor_mut().open_replace_ask(),
             Command::Copy => self.copy(),
@@ -531,7 +562,7 @@ impl App {
                     tree.refresh();
                 }
             }
-            Mode::Buffers | Mode::Help => {}
+            Mode::Buffers | Mode::Finder | Mode::Help => {}
         }
     }
 
@@ -543,6 +574,9 @@ impl App {
         self.editor_mut().set_line_numbers(line_numbers);
         if self.mode == Mode::Help {
             return self.help.render(width, height);
+        }
+        if let (Mode::Finder, Some(finder)) = (self.mode, &self.finder) {
+            return finder.render(width, height);
         }
         match (self.mode, &self.git_view, &self.file_tree, &self.buffer_list) {
             (Mode::GitView, Some(view), _, _) => view.render(width, height, now),
@@ -568,6 +602,22 @@ impl App {
             None => self.buffer_list = Some(BufferList::new(self.current)),
         }
         self.mode = Mode::Buffers;
+    }
+
+    /// Ctrl-E / `open`: lists the project's files (the version control
+    /// view of them, else a directory walk) and starts the name query.
+    fn enter_finder(&mut self) {
+        let (mut files, mut cut) = match self.git.files() {
+            Ok(files) => (files, false),
+            Err(_) => finder::walk_files(&self.location),
+        };
+        if files.len() > finder::MAX_FILES {
+            files.truncate(finder::MAX_FILES);
+            cut = true;
+        }
+        self.editor_mut().set_message(String::new());
+        self.finder = Some(Finder::new(files, cut));
+        self.mode = Mode::Finder;
     }
 
     fn enter_file_tree(&mut self) {
@@ -596,6 +646,11 @@ impl App {
             Mode::Buffers => {
                 if let Some(list) = &mut self.buffer_list {
                     list.set_message(message);
+                }
+            }
+            Mode::Finder => {
+                if let Some(finder) = &mut self.finder {
+                    finder.set_message(message);
                 }
             }
             Mode::Help => self.help.set_message(message),

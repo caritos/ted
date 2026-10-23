@@ -74,6 +74,7 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |
 | Ctrl-T | Open the file tree (again: back to the editor) |
+| Ctrl-E | Open a file by name: the file finder, see [Open file by name](#open-file-by-name) |
 | Ctrl-O | Open the buffer list (works from the git view and file tree too) |
 | Ctrl-N / Ctrl-P | Next / previous buffer, wrapping around (also leaves the git view, tree or list) |
 | Ctrl-W | Close the current buffer. A modified one warns first; press Ctrl-W again to close it without saving, any other key cancels. Closing the last buffer leaves one empty unnamed buffer. Ignored in the git view, tree and list |
@@ -115,6 +116,7 @@ Ctrl-X opens a `Command:` prompt in the message row (editor only; it does nothin
 |---|---|
 | `save` (`w`) | Save, like Ctrl-S |
 | `undo` / `redo` | Like Ctrl-Z / Ctrl-Y (`u` = `undo`, `red` = `redo`; `re` and `r` are ambiguous with `replace`) |
+| `open` | Open a file by name, like Ctrl-E |
 | `replace` | Open the Replace prompt, like Ctrl-R |
 | `qreplace` | Like `replace`, but ask for each match (`qr` is enough); see [Replace](#replace) |
 | `copy` / `cut` / `paste` / `selectall` | Like Ctrl-C / Ctrl-K / Ctrl-V / Ctrl-A (the selection survives opening the prompt, so `copy` works on it) |
@@ -158,6 +160,22 @@ Ctrl-R (or the `replace` command) opens `Replace: ` in the message row, prefille
 - Memory: the single undo step stores the span from the first to the last replaced match twice, so a replace that touches the start and the end of a huge file uses that much history (the history is capped at 64 MiB and evicts older steps first).
 - `qreplace` (Ctrl-X) asks first: after `With:` the first match is selected and the message row reads `Replace? (y)es (n)o (a)ll (q)uit [1/N]`. `y` replaces it, `n` skips it, `a` replaces it and all the rest, `q` or Esc stops; other keys are ignored. The buffer is changed only at the end, so the whole session is one undo step (and the undo step stores just the span of the chosen matches). The message then reads `Replaced K of N occurrences`; with nothing chosen nothing changes and cursor, scroll and selection go back. Scope and the shared search term work as for Ctrl-R. Ctrl-Q cancels the questions (nothing is applied) and follows the quit rules.
 - Not done yet: regular expressions, case-preserving replace, multi-line terms.
+
+## Open file by name
+
+Ctrl-E (or the `open` command) lists the project's files under the directory ted was started in (or the directory of the file you gave it). In a git repository the list is what git knows: tracked plus untracked files, minus the ignored ones, so `target/` and `node_modules/` stay out. Outside a repository ted walks the directory instead, skipping hidden names, `target` and `node_modules` and not following directory symlinks. The list is read again on every Ctrl-E and is cut at 100,000 files (the status row says `(list cut)`).
+
+The message row is the query: `Open: edi_`. Type to filter; every character of the query has to appear in the path in that order, ignoring case (`edrs` finds `src/editor.rs`; `src/ap` finds `src/app.rs`). Better matches come first: a match inside the file name beats one in the folders, a file name starting with the query beats one that merely contains it, consecutive characters and word starts count, and a shorter path wins a tie. Backspace edits the query; a paste is added to it without line breaks. `q` and `?` are text here (F1 still opens help).
+
+| Key (finder) | Action |
+|---|---|
+| Up / Down | Move the selection (typing puts it back on the best match) |
+| PageUp / PageDown | Move 10 rows |
+| Home / End | First / last match |
+| Enter | Open the selected file in a buffer (switches to it if already open) and return to the editor; a file that vanished shows `File no longer exists` and the finder stays |
+| Esc / Ctrl-E | Back to the editor, which is as it was |
+
+Ctrl-N, Ctrl-P, Ctrl-O and F1 work as elsewhere; Ctrl-Q follows the quit rules. Ctrl-E does nothing while a prompt is open.
 
 ## Help
 

@@ -36,10 +36,14 @@ impl Git for Shared {
     fn modified(&self, path: &str) -> Option<SystemTime> {
         self.0.borrow().modified(path)
     }
+    fn files(&self) -> Result<Vec<String>, GitError> {
+        self.0.borrow().files()
+    }
 }
 
 mod clipboard;
 mod command;
+mod finder;
 mod gutter;
 mod help;
 mod replace;

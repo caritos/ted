@@ -2,9 +2,9 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 21] = [
+pub const NAMES: [&str; 22] = [
     "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "replace", "qreplace",
-    "copy", "cut", "paste", "selectall", "open", "quit",
+    "copy", "cut", "paste", "selectall", "open", "grep", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +31,8 @@ pub enum Command {
     SelectAll,
     /// Open a file by name (the fuzzy finder).
     OpenFile,
+    /// Find text in the project's files.
+    Grep,
     Quit,
     WriteQuit,
 }
@@ -113,6 +115,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "paste" => plain(Command::Paste),
         "selectall" => plain(Command::SelectAll),
         "open" => plain(Command::OpenFile),
+        "grep" => plain(Command::Grep),
         "quit" => plain(Command::Quit),
         "wq" => plain(Command::WriteQuit),
         // The path keeps its case and inner spaces.
@@ -200,7 +203,7 @@ mod tests {
 
     #[test]
     fn ambiguous_prefix_lists_names_in_order() {
-        assert_eq!(err("g"), "Ambiguous: goto, git");
+        assert_eq!(err("g"), "Ambiguous: goto, git, grep");
     }
 
     #[test]
@@ -225,7 +228,7 @@ mod tests {
 
     #[test]
     fn matches_lists_prefixes_in_order() {
-        assert_eq!(matches("g"), vec!["goto", "git"]);
+        assert_eq!(matches("g"), vec!["goto", "git", "grep"]);
         assert_eq!(matches("GO"), vec!["goto"]);
         assert_eq!(matches("zzz"), Vec::<&str>::new());
         assert_eq!(matches(""), NAMES.to_vec());

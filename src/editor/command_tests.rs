@@ -129,7 +129,7 @@ fn tab_with_several_matches_completes_the_common_prefix() {
     let mut e = open("x");
     type_str(&mut e, "g");
     e.handle_key(key(KeyCode::Tab));
-    assert_eq!(e.view(60, 5).message, "Command: g_  goto git");
+    assert_eq!(e.view(60, 5).message, "Command: g_  goto git grep");
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn message_row_is_clear_after_enter_or_esc_and_other_prompts_work() {
 fn suffix_lists_matches_until_a_space() {
     let mut e = open("x");
     type_str(&mut e, "g");
-    assert_eq!(e.view(60, 5).message, "Command: g_  goto git");
+    assert_eq!(e.view(60, 5).message, "Command: g_  goto git grep");
     type_str(&mut e, "o");
     assert_eq!(e.view(60, 5).message, "Command: go_  goto");
     type_str(&mut e, "to ");

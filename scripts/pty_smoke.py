@@ -1118,6 +1118,65 @@ finally:
             pass
     shutil.rmtree(fp, ignore_errors=True)
 
+# 28. find in files: F4 in a directory that is not a repository searches the
+# files (hidden ones left out), Enter lists the hits, Enter again opens the
+# file at the line, F4 then Esc comes back.
+F4 = b"\x1b[14~"
+fp = tempfile.mkdtemp(prefix="ted-smoke-grep-")
+pid = fd = None
+try:
+    os.makedirs(os.path.join(fp, "src"))
+    with open(os.path.join(fp, "alpha.txt"), "w") as f:
+        f.write("one\ntwo needle\nthree\n")
+    with open(os.path.join(fp, "src", "beta.rs"), "w") as f:
+        f.write("fn beta() {}\n// needle\nfn z() {}\nlast line\n")
+    with open(os.path.join(fp, ".hidden"), "w") as f:
+        f.write("needle hidden\n")
+    pid, fd = spawn([], cwd=fp)
+    drain(fd)
+    send(fd, F4)
+    out = plain(drain(fd))
+    check("grep: F4 shows the query row and waits for Enter", b"Find in files: _" in out and b"Enter searches" in out, out[-300:])
+    for c in b"needle":
+        send(fd, bytes([c]))
+    send(fd, b"\r")
+    raw = drain(fd)
+    out = plain(raw)
+    check("grep: Enter lists the hits", b"alpha.txt:2: two needle" in out and b"src/beta.rs:2: // needle" in out, out[-300:])
+    check("grep: hidden files are left out", b"hidden" not in out, out[-300:])
+    check("grep: status counts them", b"2 hits in 2 files" in out, out[-300:])
+    check("grep: the selected row is reverse video", b"\x1b[7m  alpha.txt:2:" in raw, raw[-300:])
+    send(fd, b"\x1b[B")
+    drain(fd)
+    send(fd, b"\r")
+    out = plain(drain(fd))
+    check("grep: Enter opens the file at the line", b"beta.rs" in out and b"2:1" in out and b"// needle" in out, out[-300:])
+    send(fd, F4)
+    out = plain(drain(fd))
+    check("grep: the second visit starts with the last term and no results", b"Find in files: needle_" in out and b"Enter searches" in out, out[-300:])
+    send(fd, ESC)
+    out = plain(drain(fd))
+    check("grep: Esc returns to the editor", b"// needle" in out and b"Find in files" not in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("grep: exit 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(fp, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

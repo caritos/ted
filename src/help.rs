@@ -89,6 +89,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl-G", "Changes view (again: back)"),
             ("Ctrl-T", "File tree (again: back)"),
             ("Ctrl-E", "Open a file by name (fuzzy finder)"),
+            ("F4", "Find text in all files (Enter searches, then opens)"),
             ("Ctrl-O", "Buffer list"),
             ("Ctrl-N / Ctrl-P", "Next / previous buffer"),
             ("Ctrl-W", "Close the buffer (editor only; twice if unsaved)"),
@@ -106,6 +107,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("b", "Pick a baseline commit (Enter picks, Esc closes)"),
             ("q / Esc", "Back to the editor"),
             ("File finder", "Type to filter, Enter opens, Esc back"),
+            ("Find in files", "Type, Enter searches, Enter opens a hit, Esc back"),
             ("?", "Show this help"),
         ],
     ),
@@ -222,7 +224,7 @@ mod tests {
     fn table_lists_every_documented_key() {
         let keys: Vec<&str> = HELP.iter().flat_map(|(_, rows)| rows.iter().flat_map(|(k, _)| k.split(" / "))).collect();
         for name in [
-            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-R", "Ctrl-L", "Ctrl-X", "Ctrl-Z", "Ctrl-Y", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
+            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-R", "Ctrl-L", "Ctrl-X", "Ctrl-Z", "Ctrl-Y", "F3", "F4", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
             "Backspace", "Delete", "Enter", "F1", "F2", "Up", "Down", "Left", "Right", "Esc", "r", "b", "q",
             "Ctrl-A", "Ctrl-C", "Ctrl-K", "Ctrl-V", "Shift + move keys",
         ] {

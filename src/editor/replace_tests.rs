@@ -156,7 +156,7 @@ fn the_gutter_is_not_highlighted_and_columns_shift() {
     e.handle_key(ctrl('f'));
     type_str(&mut e, "foo");
     let v = e.view(30, 6);
-    assert_eq!(&v.styles[0][..4], &[Style::LineNo; 4]);
+    assert_eq!(&v.styles[0][..4], &[Style::CurrentLineNo; 4]);
     assert_eq!(matched(&v, 0), vec![4, 5, 6]);
     assert_eq!(matched(&v, 1), vec![5, 6, 7]);
 }

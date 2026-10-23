@@ -139,7 +139,8 @@ fn the_gutter_is_never_selected() {
     assert_eq!(v.lines[0], "  1 abc");
     assert!(v.styles[0][..4].iter().all(|s| *s == Style::LineNo));
     assert_eq!(selected(&v, 0), vec![4, 5, 6]);
-    assert!(v.styles[1][..4].iter().all(|s| *s == Style::LineNo));
+    // Select-all leaves the cursor at the end: the last row is the current one.
+    assert!(v.styles[1][..4].iter().all(|s| *s == Style::CurrentLineNo));
     assert_eq!(selected(&v, 1), vec![4, 5, 6]);
 }
 

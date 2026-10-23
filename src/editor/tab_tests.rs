@@ -169,7 +169,7 @@ fn line_numbers_shift_everything_and_the_gutter_is_unchanged() {
     e.set_line_numbers(true);
     let v = e.view(30, 4);
     assert_eq!(v.lines[0], "  1     fn main() {}");
-    assert_eq!(&v.styles[0][0..4], &[Style::LineNo; 4]);
+    assert_eq!(&v.styles[0][0..4], &[Style::CurrentLineNo; 4]);
     assert_eq!(&v.styles[0][4..8], &[Style::Normal; 4]);
     assert_eq!(&v.styles[0][8..10], &[Style::Keyword; 2]);
     e.handle_key(key(KeyCode::Right));

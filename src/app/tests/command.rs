@@ -26,7 +26,7 @@ fn goto_moves_the_cursor() {
 #[test]
 fn lines_toggles_and_sets() {
     let mut app = editor_app();
-    let gutter = |app: &mut App| app.screen(40, 6, t(1000)).rows[0].iter().any(|s| s.style == Style::LineNo);
+    let gutter = |app: &mut App| app.screen(40, 6, t(1000)).rows[0].iter().any(|s| matches!(s.style, Style::LineNo | Style::CurrentLineNo));
     assert!(gutter(&mut app));
     run(&mut app, "lines");
     assert!(!gutter(&mut app));

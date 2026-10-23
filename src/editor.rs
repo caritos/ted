@@ -677,7 +677,8 @@ impl Editor {
                     " ".repeat(gutter)
                 };
                 line.insert_str(0, &number);
-                row_styles.splice(0..0, std::iter::repeat_n(Style::LineNo, gutter));
+                let style = if r == row { Style::CurrentLineNo } else { Style::LineNo };
+                row_styles.splice(0..0, std::iter::repeat_n(style, gutter));
             }
         }
 

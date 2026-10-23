@@ -34,6 +34,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-23 (current-line number, issue #7)
+- Done (unit-tested, 770 tests in total): `Style::CurrentLineNo` for the gutter of the cursor's row (bold, `main.rs`; others stay dim `LineNo`); no background and no colour, so it suits any theme; absent when the gutter is off or hidden. Tests in `src/editor/gutter_tests.rs`; seven older tests that expected row 0 to be `LineNo` now expect `CurrentLineNo`.
+- Done (pty smoke, 148 checks): the two gutter checks now expect `\x1b[1m  1 ` (bold) and `\x1b[2m  2 ` (dim).
+- Not yet verified by hand: how bold vs dim reads on the real terminal and theme.
+- Deferred: a faint background across the cursor row, relative numbers, saving the line-number setting between sessions.
 ### 2026-10-23 (replace with per-match confirmation, issue #6)
 - Done (unit-tested, 767 tests in total): `qreplace` command (Ctrl-X; `qr`): `Buffer::find_matches` (positions + length, same matching and scope as `replace_all`) and `replace_matches` (the chosen positions as ONE undo `Edit`, spanning only first..last chosen) in `buffer.rs`; `Prompt.ask` / `AskSession` in `editor.rs` (`open_replace_ask`, `ask_key`, `finish_ask`): the current match is selected (`Style::Selected`), `y` / `n` / `a` / `q` / Esc (case-insensitive), other keys ignored, buffer untouched until the end, `Replaced K of N occurrences`, nothing chosen = Esc (cursor, scroll, selection back); Ctrl-Q cancels without applying. Tests: `src/editor/qreplace_tests.rs`, `src/buffer/replace_tests.rs`, `src/app/tests/replace.rs`, `src/command.rs`. Help lists it. Chose a command only (no key) and the name `qreplace` so `rep` stays unique for `replace` and `q` stays quit.
 - Done (pty smoke, 148 checks, 6 new): `[1/6]` question, reverse-video match, `y` -> `[2/6]`, `n` then `a` -> `Replaced 5 of 6 occurrences`, mixed text, one Ctrl-Z restores.

@@ -373,7 +373,18 @@ impl Editor {
         }
     }
 
-    fn prompt_line(&self, prompt: &Prompt) -> String {
+    /// The prompt row and how many of its chars (the label, the text and the
+    /// cursor mark) must stay visible; the rest is a hint that may be cut.
+    fn prompt_line(&self, prompt: &Prompt) -> (String, usize) {
+        let line = self.prompt_text(prompt);
+        let must = match prompt.kind {
+            PromptKind::Command => format!("Command: {}_", prompt.text).chars().count(),
+            _ => line.chars().count(),
+        };
+        (line, must)
+    }
+
+    fn prompt_text(&self, prompt: &Prompt) -> String {
         match prompt.kind {
             PromptKind::Goto => format!("Go to line: {}_", prompt.text),
             PromptKind::Command => {
@@ -506,7 +517,18 @@ impl Editor {
             styles,
             status: clip(&self.status_line(width), 0, width),
             message: match &self.prompt {
-                Some(prompt) => clip(&self.prompt_line(prompt), 0, width),
+                Some(prompt) => {
+                    // The label, text and cursor mark too long for the row:
+                    // show the end (where the typing happens), led by an
+                    // ellipsis. Only a cut hint list keeps the head.
+                    let (line, must) = self.prompt_line(prompt);
+                    let chars = line.chars().count();
+                    if must > width && width > 0 {
+                        format!("…{}", clip(&line, chars - (width - 1), width - 1))
+                    } else {
+                        clip(&line, 0, width)
+                    }
+                }
                 None => clip(&self.message, 0, width),
             },
             // With no text rows or no width the scroll is left alone, so the

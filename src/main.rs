@@ -138,6 +138,7 @@ fn set_style(out: &mut Stdout, style: Style) -> io::Result<()> {
     match style {
         Style::Normal => Ok(()),
         Style::Selected => queue!(out, SetAttribute(Attribute::Reverse)),
+        Style::Match => queue!(out, SetAttribute(Attribute::Underlined)),
         Style::Added => queue!(out, SetForegroundColor(Color::Green)),
         Style::Removed => queue!(out, SetForegroundColor(Color::Red)),
         Style::Hunk => queue!(out, SetForegroundColor(Color::Cyan)),

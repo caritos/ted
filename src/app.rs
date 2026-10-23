@@ -482,6 +482,7 @@ impl App {
             Command::Help => self.enter_help(),
             Command::Undo => self.editor_mut().undo(),
             Command::Redo => self.editor_mut().redo(),
+            Command::Replace => self.editor_mut().open_replace(),
             Command::Copy => self.copy(),
             Command::Cut => self.cut(),
             Command::Paste => self.paste_clipboard(),

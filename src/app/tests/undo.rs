@@ -27,7 +27,11 @@ fn unique_prefixes_run_undo_and_redo() {
     type_str(&mut app, "XY");
     run(&mut app, "u");
     assert_eq!(app.editor().buffer().text(), "abc");
+    // `re` and `r` are ambiguous with `replace` now; `red` is the shortest redo.
     run(&mut app, "re");
+    assert_eq!(msg(&mut app), "Ambiguous: redo, replace");
+    assert_eq!(app.editor().buffer().text(), "abc");
+    run(&mut app, "red");
     assert_eq!(app.editor().buffer().text(), "XYabc");
     run(&mut app, "UNDO");
     assert_eq!(app.editor().buffer().text(), "abc");

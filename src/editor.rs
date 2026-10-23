@@ -272,15 +272,15 @@ impl Editor {
                 return;
             }
             KeyCode::Enter => {
-                // Accepting a search or a jump moves on; a command may still
-                // act on the selection.
-                if prompt.kind != PromptKind::Command {
-                    self.buffer.clear_selection();
-                }
+                // Accepting a search or a jump that moves on clears the
+                // selection; one that moves nowhere acts like Esc and keeps
+                // it; a command may still act on it.
                 match prompt.kind {
                     PromptKind::Find => {
-                        if prompt.status == FindStatus::NotFound {
-                            self.restore_origin(&prompt);
+                        if prompt.status == FindStatus::NotFound || prompt.text.is_empty() {
+                            self.cancel(&prompt);
+                        } else {
+                            self.buffer.clear_selection();
                         }
                         if !prompt.text.is_empty() {
                             self.accepted_search = Some(prompt.text.clone());
@@ -291,6 +291,8 @@ impl Editor {
                         let n = prompt.text.parse::<usize>().unwrap_or(usize::MAX);
                         if !prompt.text.is_empty() && n > 0 {
                             self.buffer.go_to_line(n);
+                        } else {
+                            self.cancel(&prompt);
                         }
                     }
                     PromptKind::Command => {

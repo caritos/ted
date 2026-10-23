@@ -337,13 +337,28 @@ fn cancel_prompt_keeps_the_selection() {
 
 #[test]
 fn an_accepted_find_or_goto_clears_the_selection() {
-    for (open, typed) in [('f', "def"), ('l', "2"), ('f', "zzz")] {
+    for (open, typed) in [('f', "def"), ('l', "2")] {
         let mut e = plain("abc def\nsecond");
         press(&mut e, shift(KeyCode::Right), 2);
         e.handle_key(ctrl(open));
         type_chars(&mut e, typed);
         e.handle_key(key(KeyCode::Enter));
         assert!(e.buffer().selection().is_none(), "{open} {typed}");
+    }
+}
+
+#[test]
+fn accepting_a_find_that_found_nothing_keeps_the_selection_like_esc() {
+    // Not found, an empty Find, and an empty Go to line all move nothing.
+    for (open, typed) in [('f', "zzz"), ('f', ""), ('l', "")] {
+        let mut e = plain("abc def\nsecond");
+        press(&mut e, shift(KeyCode::Right), 2);
+        let cursor = e.buffer().cursor();
+        e.handle_key(ctrl(open));
+        type_chars(&mut e, typed);
+        e.handle_key(key(KeyCode::Enter));
+        assert_eq!(selected_text(&e).as_deref(), Some("ab"), "{open} {typed:?}");
+        assert_eq!(e.buffer().cursor(), cursor);
     }
 }
 

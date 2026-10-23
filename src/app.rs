@@ -56,6 +56,8 @@ pub struct App {
     /// Line number gutter, one setting for every buffer; applied to the
     /// current editor before each draw.
     line_numbers: bool,
+    /// The last accepted search term, shared by every buffer.
+    search: String,
 }
 
 impl App {
@@ -77,6 +79,7 @@ impl App {
             help_from: Mode::Editor,
             hint_pending: true,
             line_numbers: true,
+            search: String::new(),
         }
     }
 
@@ -185,6 +188,11 @@ impl App {
                     editor.set_message(String::new());
                 }
             }
+        }
+        // Whatever buffer is current gets the shared term before it sees the key.
+        if self.mode == Mode::Editor && !self.search.is_empty() {
+            let term = self.search.clone();
+            self.editor_mut().set_last_search(&term);
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let is_quit = ctrl && key.code == KeyCode::Char('q');
@@ -311,6 +319,9 @@ impl App {
 
     /// After the editor handled a key: runs the command the key accepted, if any.
     fn finish_key(&mut self, flow: Flow, now: SystemTime) -> Flow {
+        if let Some(term) = self.editor_mut().take_search() {
+            self.search = term;
+        }
         match self.editor_mut().take_command() {
             Some(text) => self.run_command(&text, now),
             None => flow,

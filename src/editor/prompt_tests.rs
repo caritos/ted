@@ -509,3 +509,38 @@ fn prompt_sweeps_tiny_sizes_without_panic() {
         }
     }
 }
+
+#[test]
+fn take_search_returns_an_accepted_term_once() {
+    let mut e = ed("foo\nbar");
+    assert_eq!(e.take_search(), None);
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "foo");
+    assert_eq!(e.take_search(), None);
+    e.handle_key(key(KeyCode::Enter));
+    assert_eq!(e.take_search(), Some("foo".to_string()));
+    assert_eq!(e.take_search(), None);
+}
+
+#[test]
+fn take_search_is_none_after_esc_or_empty_enter() {
+    let mut e = ed("foo\nbar");
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "foo");
+    e.handle_key(key(KeyCode::Esc));
+    assert_eq!(e.take_search(), None);
+    e.handle_key(ctrl('f'));
+    e.handle_key(key(KeyCode::Enter));
+    assert_eq!(e.take_search(), None);
+}
+
+#[test]
+fn set_last_search_prefills_and_drives_f3() {
+    let mut e = ed("x\nfoo\ny\nfoo");
+    e.set_last_search("foo");
+    assert_eq!(e.take_search(), None);
+    e.handle_key(key(KeyCode::F(3)));
+    assert_eq!(e.buffer().cursor(), (1, 0));
+    e.handle_key(ctrl('f'));
+    assert_eq!(e.view(40, 6).message, "Find: foo_");
+}

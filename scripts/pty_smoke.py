@@ -770,6 +770,69 @@ finally:
             pass
     shutil.rmtree(up, ignore_errors=True)
 
+# 22. one search term for all buffers: accept `needle` in the first buffer,
+# switch with Ctrl-N, and the second buffer's Ctrl-F is prefilled with it;
+# Esc, then F3 finds the next one from the second buffer's own cursor.
+shr = tempfile.mkdtemp(prefix="ted-smoke-shared-")
+pid = fd = None
+try:
+    with open(os.path.join(shr, "a.txt"), "w") as f:
+        f.write("a body\nneedle here\n")
+    with open(os.path.join(shr, "b.txt"), "w") as f:
+        f.write("b body\nplain\nneedle there\n")
+    pid, fd = spawn([shr])
+    drain(fd)
+    send(fd, CTRL_T)
+    drain(fd)
+    send(fd, b"\r")  # a.txt
+    drain(fd)
+    send(fd, CTRL_T)
+    drain(fd)
+    send(fd, b"\x1b[B")
+    send(fd, b"\r")  # b.txt
+    out = plain(drain(fd, 0.5, 2.0))
+    check("shared search: both files open", b"[2/2]" in out and b"b body" in out, out[-300:])
+    send(fd, CTRL_P)
+    drain(fd)
+    send(fd, CTRL_F)
+    drain(fd)
+    send(fd, b"needle")
+    drain(fd)
+    send(fd, b"\r")
+    out = plain(drain(fd, 0.5, 2.0))
+    check("shared search: Enter accepts in the first buffer (status 2:1)", b" 2:1" in out and b"Find:" not in out, out[-300:])
+    send(fd, b"\x0e")  # Ctrl-N
+    out = plain(drain(fd, 0.5, 2.0))
+    check("shared search: second buffer is current", b"[2/2]" in out and b"b body" in out, out[-300:])
+    send(fd, CTRL_F)
+    out = plain(drain(fd, 0.5, 2.0)).split(b"\x1b[?25l")[-1]
+    check("shared search: Ctrl-F in the second buffer is prefilled", b"Find: needle" in out, out[-300:])
+    send(fd, ESC)
+    out = plain(drain(fd, 0.6, 2.0))
+    check("shared search: Esc closes the prompt, cursor back at 1:1", b"Find:" not in out and b" 1:1" in out, out[-300:])
+    send(fd, F3)
+    out = plain(drain(fd, 0.5, 2.0))
+    check("shared search: F3 in the second buffer jumps to its match (status 3:1)", b" 3:1" in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("shared search: exit 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(shr, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

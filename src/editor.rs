@@ -71,6 +71,8 @@ pub struct Editor {
     command: Option<String>,
     /// Last accepted search term, for Ctrl-F prefill and F3.
     last_search: String,
+    /// Term accepted with Enter, until `take_search`.
+    accepted_search: Option<String>,
     /// Highlight state at the start of each line (index = row), valid for
     /// every entry; extended lazily and truncated at the first edited row.
     line_states: Vec<LineState>,
@@ -94,6 +96,7 @@ impl Editor {
             prompt: None,
             command: None,
             last_search: String::new(),
+            accepted_search: None,
             line_states: Vec::new(),
             highlighted: None,
             #[cfg(test)]
@@ -205,6 +208,7 @@ impl Editor {
                             self.restore_origin(&prompt);
                         }
                         if !prompt.text.is_empty() {
+                            self.accepted_search = Some(prompt.text.clone());
                             self.last_search = prompt.text;
                         }
                     }
@@ -265,6 +269,19 @@ impl Editor {
     /// prompt was cancelled or blank.
     pub fn take_command(&mut self) -> Option<String> {
         self.command.take()
+    }
+
+    /// Sets the remembered term (the app's shared one) without marking it new.
+    pub fn set_last_search(&mut self, term: &str) {
+        if self.last_search != term {
+            self.last_search = term.to_string();
+        }
+    }
+
+    /// The term accepted with Enter, once; `None` if the prompt was
+    /// cancelled or empty.
+    pub fn take_search(&mut self) -> Option<String> {
+        self.accepted_search.take()
     }
 
     /// F3: next match of the remembered term after the cursor.

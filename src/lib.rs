@@ -8,6 +8,7 @@ pub mod filetree;
 pub mod finder;
 pub mod fuzzy;
 pub mod git;
+pub mod grep;
 pub mod gitview;
 pub mod help;
 pub mod highlight;

@@ -128,11 +128,20 @@ impl App {
         self.current
     }
 
+    /// Makes buffer `i` the showing one; the selection of the buffer left and
+    /// of the one entered is dropped.
+    fn set_current(&mut self, i: usize) {
+        self.editors[self.current].clear_selection();
+        self.current = i;
+        self.editors[i].clear_selection();
+    }
+
     /// Switches to the next (`forward`) or previous buffer, wrapping, and
     /// returns to the editor.
     fn cycle(&mut self, forward: bool) {
         let n = self.editors.len();
-        self.current = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
+        let next = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
+        self.set_current(next);
         self.close_picker();
         self.mode = Mode::Editor;
     }
@@ -160,6 +169,7 @@ impl App {
             self.editors.push(Editor::new(Buffer::new()));
         }
         self.current = self.current.saturating_sub(1);
+        self.editors[self.current].clear_selection();
     }
 
     /// Quits at once when no buffer is modified; otherwise warns, and a
@@ -297,7 +307,7 @@ impl App {
                     ListAction::None => {}
                     ListAction::Back => self.mode = Mode::Editor,
                     ListAction::Switch(i) => {
-                        self.current = i.min(n - 1);
+                        self.set_current(i.min(n - 1));
                         self.mode = Mode::Editor;
                     }
                     ListAction::ToggleGit => self.enter_git_view(now),
@@ -473,7 +483,7 @@ impl App {
     fn open(&mut self, rel: &str) {
         let path = self.location.join(rel);
         if let Some(i) = self.position_of(&path) {
-            self.current = i;
+            self.set_current(i);
             self.mode = Mode::Editor;
             // A buffer with edits keeps them and is not read again. An
             // unedited one is refreshed from disk, unless the disk text is
@@ -515,6 +525,7 @@ impl App {
             self.editors[0] = Editor::new(buffer);
             self.current = 0;
         } else {
+            self.editors[self.current].clear_selection();
             self.editors.push(Editor::new(buffer));
             self.current = self.editors.len() - 1;
         }

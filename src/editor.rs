@@ -124,6 +124,11 @@ impl Editor {
         &self.message
     }
 
+    /// Drops the selection (the app does this when the buffer is left or shown).
+    pub fn clear_selection(&mut self) {
+        self.buffer.clear_selection();
+    }
+
     pub fn in_prompt(&self) -> bool {
         self.prompt.is_some()
     }
@@ -328,6 +333,7 @@ impl Editor {
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let select = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
             KeyCode::Char('s') if ctrl => self.save(),
             KeyCode::Char('f') if ctrl => self.open_prompt(PromptKind::Find),
@@ -336,23 +342,30 @@ impl Editor {
             KeyCode::Char('z') if ctrl => self.undo(),
             KeyCode::Char('y') if ctrl => self.redo(),
             KeyCode::F(3) => self.find_again(),
+            KeyCode::Char('a') if ctrl => self.buffer.select_all(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline(),
             KeyCode::Backspace => self.buffer.backspace(),
             KeyCode::Delete => self.buffer.delete(),
+            KeyCode::Esc => self.buffer.clear_selection(),
             KeyCode::Tab => {
-                for _ in 0..TAB_STOP {
-                    self.buffer.insert_char(' ');
+                if self.buffer.selection().is_some() {
+                    // One undo step together with the deletion.
+                    self.buffer.insert_str(&" ".repeat(TAB_STOP));
+                } else {
+                    for _ in 0..TAB_STOP {
+                        self.buffer.insert_char(' ');
+                    }
                 }
             }
-            KeyCode::Left => self.buffer.move_left(),
-            KeyCode::Right => self.buffer.move_right(),
-            KeyCode::Up => self.buffer.move_up(),
-            KeyCode::Down => self.buffer.move_down(),
-            KeyCode::Home => self.buffer.move_home(),
-            KeyCode::End => self.buffer.move_end(),
-            KeyCode::PageUp => self.buffer.move_up_by(self.page),
-            KeyCode::PageDown => self.buffer.move_down_by(self.page),
+            KeyCode::Left => self.buffer.move_left_select(select),
+            KeyCode::Right => self.buffer.move_right_select(select),
+            KeyCode::Up => self.buffer.move_up_select(select),
+            KeyCode::Down => self.buffer.move_down_select(select),
+            KeyCode::Home => self.buffer.move_home_select(select),
+            KeyCode::End => self.buffer.move_end_select(select),
+            KeyCode::PageUp => self.buffer.move_up_by_select(self.page, select),
+            KeyCode::PageDown => self.buffer.move_down_by_select(self.page, select),
             _ => {}
         }
         Flow::Continue
@@ -400,6 +413,7 @@ impl Editor {
             }
         }
         let mut styles = self.styles(&text, &layouts);
+        self.mark_selection(&mut styles, &layouts);
         let mut lines = text;
         if gutter > 0 {
             let digits = gutter - 1;
@@ -429,6 +443,27 @@ impl Editor {
                 row.saturating_sub(self.scroll_row),
                 gutter + col.saturating_sub(self.scroll_col),
             ),
+        }
+    }
+
+    /// Draws the selection over `styles` (it wins over syntax colors). Each
+    /// line's selected cells are styled; a line break itself is not drawn.
+    fn mark_selection(&self, styles: &mut [Vec<Style>], layouts: &[Vec<usize>]) {
+        let Some((start, end)) = self.buffer.selection() else {
+            return;
+        };
+        for (i, (row_styles, cells)) in styles.iter_mut().zip(layouts).enumerate() {
+            let r = self.scroll_row + i;
+            if r < start.0 || r > end.0 {
+                continue;
+            }
+            let from = if r == start.0 { start.1 } else { 0 };
+            let to = if r == end.0 { end.1 } else { usize::MAX };
+            for (style, &c) in row_styles.iter_mut().zip(cells) {
+                if c >= from && c < to {
+                    *style = Style::Selected;
+                }
+            }
         }
     }
 
@@ -597,6 +632,8 @@ mod command_tests;
 mod gutter_tests;
 #[cfg(test)]
 mod prompt_tests;
+#[cfg(test)]
+mod selection_tests;
 #[cfg(test)]
 mod tab_tests;
 #[cfg(test)]

@@ -543,6 +543,27 @@ impl Buffer {
         self.goal_col = self.col;
     }
 
+    /// Where the selection started as (row, col), or `None` when nothing is
+    /// selected. With `restore_selection` it lets a caller that moves the
+    /// cursor away (a prompt) put the selection back.
+    pub fn selection_anchor(&self) -> Option<(usize, usize)> {
+        self.selection_range()?;
+        Some(self.position_of(self.anchor?.min(self.rope.len_chars())))
+    }
+
+    /// Re-establishes a selection from `anchor` to the cursor. Does nothing
+    /// (and selects nothing) for `None`, an out-of-range row or an anchor at
+    /// the cursor; a column past the line end is clamped.
+    pub fn restore_selection(&mut self, anchor: Option<(usize, usize)>) {
+        self.anchor = anchor.and_then(|(row, col)| {
+            if row >= self.line_count() {
+                return None;
+            }
+            let index = self.rope.line_to_char(row) + col.min(self.line_len(row));
+            (index != self.cursor_index()).then_some(index)
+        });
+    }
+
     /// Drops the selection; the cursor stays where it is.
     pub fn clear_selection(&mut self) {
         self.anchor = None;

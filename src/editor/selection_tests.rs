@@ -231,10 +231,9 @@ fn esc_in_a_prompt_cancels_the_prompt_only() {
     e.handle_key(ctrl('f'));
     assert!(e.in_prompt());
     e.handle_key(key(KeyCode::Esc));
-    // The prompt took the Esc (restoring the cursor, which also drops the
-    // selection); nothing was edited.
+    // The prompt took the Esc (the selection is kept); nothing was edited.
     assert!(!e.in_prompt());
-    assert!(e.buffer().selection().is_none());
+    assert!(e.buffer().selection().is_some());
     assert_eq!(e.buffer().text(), "abc");
 }
 
@@ -274,4 +273,87 @@ fn tiny_sizes_with_a_selection_never_panic() {
             }
         }
     }
+}
+
+// --- prompts keep the selection on Esc -------------------------------------
+
+fn selected_text(e: &Editor) -> Option<String> {
+    e.buffer().selected_text()
+}
+
+fn type_chars(e: &mut Editor, text: &str) {
+    for c in text.chars() {
+        e.handle_key(key(KeyCode::Char(c)));
+    }
+}
+
+#[test]
+fn esc_in_find_goto_and_command_prompts_keeps_the_selection() {
+    for open in ['f', 'l', 'x'] {
+        let mut e = plain("one two\nthree two\nfour");
+        e.handle_key(key(KeyCode::Right));
+        press(&mut e, shift(KeyCode::Right), 4);
+        let want = selected_text(&e);
+        assert_eq!(want.as_deref(), Some("ne t"));
+        let cursor = e.buffer().cursor();
+        e.handle_key(ctrl(open));
+        assert!(e.in_prompt());
+        if open == 'f' {
+            type_chars(&mut e, "two");
+        } else if open == 'l' {
+            type_chars(&mut e, "3");
+        } else {
+            type_chars(&mut e, "undo");
+        }
+        e.handle_key(key(KeyCode::Esc));
+        assert!(!e.in_prompt());
+        assert_eq!(selected_text(&e), want, "prompt {open}");
+        assert_eq!(e.buffer().cursor(), cursor);
+    }
+}
+
+#[test]
+fn esc_keeps_a_backwards_selection_too() {
+    let mut e = plain("abcdef");
+    e.handle_key(key(KeyCode::End));
+    press(&mut e, shift(KeyCode::Left), 3);
+    let want = selected_text(&e);
+    e.handle_key(ctrl('f'));
+    type_chars(&mut e, "b");
+    e.handle_key(key(KeyCode::Esc));
+    assert_eq!(selected_text(&e), want);
+    assert_eq!(want.as_deref(), Some("def"));
+}
+
+#[test]
+fn cancel_prompt_keeps_the_selection() {
+    let mut e = plain("abcdef");
+    press(&mut e, shift(KeyCode::Right), 2);
+    e.handle_key(ctrl('f'));
+    type_chars(&mut e, "d");
+    e.cancel_prompt();
+    assert_eq!(selected_text(&e).as_deref(), Some("ab"));
+}
+
+#[test]
+fn an_accepted_find_or_goto_clears_the_selection() {
+    for (open, typed) in [('f', "def"), ('l', "2"), ('f', "zzz")] {
+        let mut e = plain("abc def\nsecond");
+        press(&mut e, shift(KeyCode::Right), 2);
+        e.handle_key(ctrl(open));
+        type_chars(&mut e, typed);
+        e.handle_key(key(KeyCode::Enter));
+        assert!(e.buffer().selection().is_none(), "{open} {typed}");
+    }
+}
+
+#[test]
+fn an_accepted_command_prompt_keeps_the_selection_for_the_command() {
+    let mut e = plain("abc def");
+    press(&mut e, shift(KeyCode::Right), 2);
+    e.handle_key(ctrl('x'));
+    type_chars(&mut e, "copy");
+    e.handle_key(key(KeyCode::Enter));
+    assert_eq!(selected_text(&e).as_deref(), Some("ab"));
+    assert_eq!(e.take_command().as_deref(), Some("copy"));
 }

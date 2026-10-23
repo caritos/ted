@@ -1052,3 +1052,47 @@ fn randomized_edits_with_merging_saves_and_cursors() {
         random_run_merging(seed);
     }
 }
+
+// --- re-establishing a selection -------------------------------------------
+
+#[test]
+fn selection_anchor_and_restore_round_trip() {
+    let mut b = Buffer::from_text("abc\ndef\nghi");
+    b.set_cursor(0, 1);
+    b.move_down_select(true);
+    b.move_right_select(true);
+    let anchor = b.selection_anchor();
+    assert_eq!(anchor, Some((0, 1)));
+    let before = sel(&b);
+    b.set_cursor(2, 2);
+    assert!(sel(&b).is_none());
+    b.set_cursor(1, 2);
+    b.restore_selection(anchor);
+    assert_eq!(sel(&b), before);
+    assert_eq!(b.selected_text().as_deref(), Some("bc\nde"));
+}
+
+#[test]
+fn restore_selection_ignores_none_empty_and_out_of_range() {
+    let mut b = Buffer::from_text("abc\ndef");
+    b.restore_selection(None);
+    assert!(sel(&b).is_none());
+    b.set_cursor(0, 2);
+    b.restore_selection(Some((0, 2)));
+    assert!(sel(&b).is_none(), "anchor == cursor is no selection");
+    b.restore_selection(Some((9, 9)));
+    assert!(sel(&b).is_none());
+    b.restore_selection(Some((0, 99)));
+    assert_eq!(sel(&b), Some(((0, 2), (0, 3))));
+    assert_cursor_valid(&b);
+}
+
+#[test]
+fn selection_anchor_is_none_without_a_selection() {
+    let mut b = Buffer::from_text("abc");
+    assert_eq!(b.selection_anchor(), None);
+    b.select_all();
+    assert_eq!(b.selection_anchor(), Some((0, 0)));
+    b.clear_selection();
+    assert_eq!(b.selection_anchor(), None);
+}

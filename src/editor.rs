@@ -49,6 +49,9 @@ struct Prompt {
     /// Cursor and scroll (row, col) when the prompt opened; Esc restores them.
     origin: (usize, usize),
     scroll: (usize, usize),
+    /// Where the selection started when the prompt opened; Esc brings the
+    /// selection back (an accepted Find / Go to has cleared it).
+    anchor: Option<(usize, usize)>,
     /// Current match, the start for next/previous.
     current: Option<(usize, usize)>,
     status: FindStatus,
@@ -136,8 +139,14 @@ impl Editor {
     /// Closes an open prompt as Esc does: cursor and scroll go back.
     pub fn cancel_prompt(&mut self) {
         if let Some(prompt) = self.prompt.take() {
-            self.restore_origin(&prompt);
+            self.cancel(&prompt);
         }
+    }
+
+    /// Esc: cursor, scroll and selection go back to how they were.
+    fn cancel(&mut self, prompt: &Prompt) {
+        self.restore_origin(prompt);
+        self.buffer.restore_selection(prompt.anchor);
     }
 
     fn restore_origin(&mut self, prompt: &Prompt) {
@@ -155,6 +164,7 @@ impl Editor {
             text: String::new(),
             origin: self.buffer.cursor(),
             scroll: (self.scroll_row, self.scroll_col),
+            anchor: self.buffer.selection_anchor(),
             current: None,
             status: FindStatus::Normal,
         };
@@ -203,10 +213,15 @@ impl Editor {
         let find = prompt.kind == PromptKind::Find;
         match key.code {
             KeyCode::Esc => {
-                self.restore_origin(&prompt);
+                self.cancel(&prompt);
                 return;
             }
             KeyCode::Enter => {
+                // Accepting a search or a jump moves on; a command may still
+                // act on the selection.
+                if prompt.kind != PromptKind::Command {
+                    self.buffer.clear_selection();
+                }
                 match prompt.kind {
                     PromptKind::Find => {
                         if prompt.status == FindStatus::NotFound {

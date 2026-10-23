@@ -92,11 +92,13 @@ The editor shows a line number gutter on the left, on by default: the number is 
 
 ## Selection and clipboard
 
-Hold Shift with an arrow key, Home, End, PageUp or PageDown to select: the anchor stays where you started and the cursor moves like the unshifted key. Ctrl-A selects everything. Selected cells are drawn in reverse video (over syntax colors; the gutter and a line break are never drawn selected). Any unshifted movement key, a search jump, Go to line, undo, redo, save, a buffer switch or Esc clears the selection. Typing, Tab or Enter replaces it; Backspace or Delete deletes it; each is one undo step together with the deletion. Esc in a Find / Go to line / Command prompt cancels the prompt and keeps the selection; accepting a Find or Go to line clears it.
+Hold Shift with an arrow key, Home, End, PageUp or PageDown to select: the anchor stays where you started and the cursor moves like the unshifted key. Ctrl-A selects everything. Selected cells are drawn in reverse video (over syntax colors; the gutter and a line break are never drawn selected). Any unshifted movement key, a search jump, Go to line, undo, redo, save, a buffer switch or Esc clears the selection. Typing, Tab or Enter replaces it; Backspace or Delete deletes it; each is one undo step together with the deletion. Esc in a Find / Go to line / Command prompt cancels the prompt and keeps the selection; accepting a Find or Go to line that moves the cursor clears it (one that finds nothing, or an empty one, keeps it like Esc).
 
-- Ctrl-C copies, Ctrl-K cuts, Ctrl-V pastes (editor only; they do nothing in prompts, views and help). With nothing selected copy and cut show `Nothing selected`. Messages: `Copied N chars`, `Cut N chars`. Paste replaces a selection; copy, cut and paste are each one undo step.
-- The system clipboard is used through `pbcopy`/`pbpaste` (macOS), `wl-copy`/`wl-paste` or `xclip -selection clipboard`, whichever is installed. Each call is limited to 2 seconds; a missing tool, a non-zero exit, output that is not UTF-8 and a timeout all count as "unavailable".
-- Fallback: ted also keeps an in-memory register that every copy and cut fills. Paste uses the system clipboard's text, and the register when that is empty or unavailable, so copy and paste inside ted work with no clipboard tool at all. With nothing in either, paste shows `Nothing to paste`. Text pasted from the clipboard has CRLF and lone CR turned into `\n`.
+- Ctrl-C copies, Ctrl-K cuts, Ctrl-V pastes (editor only; they do nothing in prompts, views and help). With nothing selected copy and cut show `Nothing selected`. Messages: `Copied N chars`, `Cut N chars`, with ` (ted only)` added when the system clipboard did not get the text. Paste replaces a selection. Copy is not an edit (nothing to undo); cut and paste are each one undo step.
+- The system clipboard is used through `pbcopy`/`pbpaste` (macOS), `wl-copy`/`wl-paste` or `xclip -selection clipboard`, whichever is installed. Each call is limited to 2 seconds in total, and the tools run with `LC_ALL=en_US.UTF-8` (without a UTF-8 locale, `pbcopy` / `pbpaste` use MacRoman and corrupt non-ASCII text, for example in tmux without `LANG` or some ssh sessions). Text over 64 MiB is refused (`Clipboard too large`).
+- Paste uses the system clipboard's text. If the clipboard works but holds no text (empty, an image, files, bytes that are not UTF-8) ted pastes nothing and says `Clipboard has no text`; if reading failed or timed out, `Clipboard read failed`.
+- Fallback: ted also keeps an in-memory register that every copy and cut fills. It is used only when no clipboard tool is installed at all, or when the last copy never reached the system clipboard (`(ted only)`) and the system has nothing newer to say (empty or a failed read; text found there wins). So copy and paste inside ted work with no clipboard tool, and an old register never overrides what you copied elsewhere. With nothing at all, paste shows `Nothing to paste`. Text pasted from the clipboard has CRLF and lone CR turned into `\n` (so a file with CRLF line ends pasted into ted becomes LF text; bracketed paste does the same).
+- A Find / Go to / Command prompt wider than the message row shows its end, led by `…`, so the typing position stays visible.
 - Bracketed paste: ted asks the terminal to wrap pasted text in markers (and turns that off on exit), so a paste from the terminal (Cmd-V and so on) arrives as one piece: inserted whole as one undo step, in 5 MB in a fraction of a second, with CRLF and lone CR normalised and tabs kept. In an open Find or Command prompt it is added to the prompt with line breaks removed (so a pasted newline can never run a command; at most 4096 characters); in Go to line only its digits are kept; the git view, tree, buffer list and help ignore it. A terminal without bracketed paste types the text as keys, as before.
 - Pasted control characters are stored as pasted and saved byte for byte, but drawn as `?` like any other.
 
@@ -209,7 +211,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 672 unit tests
+cargo test                                   # 686 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```

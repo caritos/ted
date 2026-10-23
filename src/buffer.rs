@@ -331,6 +331,72 @@ impl Buffer {
         self.shift(select, Self::step_right);
     }
 
+    /// To the start of the word before the cursor (skipping what is not a
+    /// word char, line breaks included); with `select` the selection is
+    /// extended instead of cleared.
+    pub fn move_word_left_select(&mut self, select: bool) {
+        self.shift(select, |b| {
+            b.merge_ok = false;
+            b.place_cursor(b.word_left_index());
+            b.goal_col = b.col;
+        });
+    }
+
+    /// To the end of the word after the cursor; see `move_word_left_select`.
+    pub fn move_word_right_select(&mut self, select: bool) {
+        self.shift(select, |b| {
+            b.merge_ok = false;
+            b.place_cursor(b.word_right_index());
+            b.goal_col = b.col;
+        });
+    }
+
+    /// Deletes the selection, or else back to the start of the previous word,
+    /// as one undo step. Nothing happens at the start of the buffer.
+    pub fn delete_word_left(&mut self) {
+        if !self.delete_selection() {
+            let (from, to) = (self.word_left_index(), self.cursor_index());
+            if from < to {
+                self.replace_range(from, to, "");
+            }
+        }
+    }
+
+    /// Deletes the selection, or else up to the end of the next word.
+    pub fn delete_word_right(&mut self) {
+        if !self.delete_selection() {
+            let (from, to) = (self.cursor_index(), self.word_right_index());
+            if from < to {
+                self.replace_range(from, to, "");
+            }
+        }
+    }
+
+    /// Char index where a word move to the left from the cursor lands.
+    fn word_left_index(&self) -> usize {
+        let mut i = self.cursor_index();
+        while i > 0 && !is_word_char(self.rope.char(i - 1)) {
+            i -= 1;
+        }
+        while i > 0 && is_word_char(self.rope.char(i - 1)) {
+            i -= 1;
+        }
+        i
+    }
+
+    /// Char index where a word move to the right from the cursor lands.
+    fn word_right_index(&self) -> usize {
+        let len = self.rope.len_chars();
+        let mut i = self.cursor_index();
+        while i < len && !is_word_char(self.rope.char(i)) {
+            i += 1;
+        }
+        while i < len && is_word_char(self.rope.char(i)) {
+            i += 1;
+        }
+        i
+    }
+
     pub fn move_up(&mut self) {
         self.move_up_select(false);
     }
@@ -914,6 +980,11 @@ impl Edit {
     }
 }
 
+/// Whether `c` belongs to a word for the word moves: letters, digits, `_`.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
 /// Whether `c` ends a line for ropey.
 fn is_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{0B}' | '\u{0C}' | '\u{85}' | '\u{2028}' | '\u{2029}')
@@ -1097,3 +1168,5 @@ mod selection_tests;
 mod replace_tests;
 #[cfg(test)]
 mod indent_tests;
+#[cfg(test)]
+mod word_tests;

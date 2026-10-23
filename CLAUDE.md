@@ -34,6 +34,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-23 (word moves)
+- Done (unit-tested, 800 tests in total): `Buffer::move_word_left_select` / `move_word_right_select` / `delete_word_left` / `delete_word_right` (word = alphanumeric or `_`; other chars, line breaks included, are skipped; the delete is one undo step and with a selection deletes only it), keys in `Editor::handle_key`: Alt or Ctrl + Left/Right (Shift selects), Alt-B / Alt-F (what macOS Terminal sends for Option+arrows), Alt/Ctrl-Backspace, Alt/Ctrl-Delete, Alt-D; ignored in prompts. Help has a "Words" section after Selection (Ctrl-Q still on the first 80x24 screen). Tests: `src/buffer/word_tests.rs`, `src/editor/word_tests.rs`.
+- Done (pty smoke, 5 new checks): ESC f twice -> `1:8`, ESC b -> `1:5`, ESC DEL deletes `foo `, Ctrl-Z restores, exit 0.
+- Not yet verified by hand: Option+arrows in the user's terminal (some send ESC b / ESC f, others `CSI 1;3D`, others nothing unless "Use Option as Meta" is on), tmux, Ctrl+arrows (macOS Mission Control may grab them).
+- Deferred: Shift-Alt with Alt-B / Alt-F is untested because terminals differ, camelCase word parts, a configurable word definition.
 ### 2026-10-23 (auto-indent)
 - Done (unit-tested, 783 tests in total): `Buffer::insert_newline_indent` (Enter in the editor): `"\n"` plus the leading spaces/tabs of the row where the insertion starts (the selection start, else the cursor), only up to the cursor column, via `insert_str` so it is one undo step and replaces a selection; `insert_newline` is unchanged (still used by tests). Tests: `src/buffer/indent_tests.rs`, `src/editor/indent_tests.rs`.
 - Done (pty smoke, 2 new checks, 150 in total): `    a`, Enter, `b`, Enter, Tab `c`, Enter, `d` saves as `    a\n    b\n        c\n        d`.

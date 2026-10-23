@@ -49,6 +49,14 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Words",
+        &[
+            ("Alt-Left / Alt-Right", "Move by word (Ctrl too; Shift selects)"),
+            ("Alt-B / Alt-F", "Same (Option+arrows in macOS Terminal)"),
+            ("Alt-Backspace / Alt-D", "Delete the previous / next word"),
+        ],
+    ),
+    (
         "Find / go to line prompt",
         &[
             ("Enter", "Accept and stay at the match"),

@@ -1035,6 +1035,30 @@ check("indent: exit 0", code == 0, code)
 saved = open(path_ai).read() if os.path.exists(path_ai) else None
 check("indent: Enter keeps the indentation", saved == "    a\n    b\n        c\n        d", repr(saved))
 
+# 26. word moves: Option+arrows arrive as ESC b / ESC f. Alt-F twice, Alt-B
+# once, then Alt-Backspace (ESC DEL) deletes the word before the cursor.
+path_w = os.path.join(tmp, "words.txt")
+with open(path_w, "w") as f:
+    f.write("foo bar baz\n")
+pid, fd = spawn([path_w])
+drain(fd)
+send(fd, b"\x1bf")
+send(fd, b"\x1bf")
+out = last_frame(drain(fd))
+check("words: Alt-F twice is at the end of `bar` (1:8)", b"1:8" in out, out[-200:])
+send(fd, b"\x1bb")
+out = last_frame(drain(fd))
+check("words: Alt-B goes to the start of `bar` (1:5)", b"1:5" in out, out[-200:])
+send(fd, b"\x1b\x7f")
+out = last_frame(drain(fd))
+check("words: Alt-Backspace deletes `foo `", b"bar baz" in out and b"foo" not in out and b"[+]" in out, out[-300:])
+send(fd, CTRL_Z)
+out = last_frame(drain(fd))
+check("words: one Ctrl-Z restores it", b"foo bar baz" in out and b"[+]" not in out, out[-300:])
+send(fd, CTRL_Q)
+drain(fd)
+check("words: exit 0", wait_exit(pid) == 0)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

@@ -68,6 +68,8 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | Arrow keys | Move the cursor. Left and Right wrap across line ends; Up and Down remember the column across short lines |
 | Printable keys | Insert text |
 | Enter | New line, indented like the line you leave (its leading spaces and tabs, only as far as the cursor is; a selection is replaced; one undo step) |
+| Alt-Left / Alt-Right | Move by word (Ctrl-Left / Ctrl-Right too; Alt-B / Alt-F is what macOS Terminal sends for Option+arrows; with Shift the selection grows). A word is letters, digits and `_`; punctuation and line breaks are skipped |
+| Alt-Backspace / Alt-D | Delete the previous / next word (Ctrl-Backspace / Ctrl-Delete too; with a selection, just the selection); one undo step |
 | Tab | Insert 4 spaces (an existing tab character is drawn up to the next multiple of 4) |
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |
@@ -103,7 +105,7 @@ Hold Shift with an arrow key, Home, End, PageUp or PageDown to select: the ancho
 - Bracketed paste: ted asks the terminal to wrap pasted text in markers (and turns that off on exit), so a paste from the terminal (Cmd-V and so on) arrives as one piece: inserted whole as one undo step, in 5 MB in a fraction of a second, with CRLF and lone CR normalised and tabs kept. In an open Find or Command prompt it is added to the prompt with line breaks removed (so a pasted newline can never run a command; at most 4096 characters); in Go to line only its digits are kept; the git view, tree, buffer list and help ignore it. A terminal without bracketed paste types the text as keys, as before.
 - Pasted control characters are stored as pasted and saved byte for byte, but drawn as `?` like any other.
 
-Not done yet: mouse selection, word-wise selection (Ctrl-Shift-arrows), rectangular selection, OSC 52 (copy over ssh), selection in the git view / tree / help, clipboard history.
+Not done yet: mouse selection, rectangular selection, OSC 52 (copy over ssh), selection in the git view / tree / help, clipboard history.
 
 ## Commands
 
@@ -242,7 +244,7 @@ Verified by hand in a real terminal: save, quit, add text, delete text. Unit tes
 
 ## Not yet
 
-mouse and word-wise selection, OSC 52, rectangular selection, clipboard history, search extras (persistent match highlight, regex, case-preserving replace, multi-line queries, search in other views, search history), command history and argument completion in the command prompt, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
+mouse selection, OSC 52, rectangular selection, clipboard history, search extras (persistent match highlight, regex, case-preserving replace, multi-line queries, search in other views, search history), command history and argument completion in the command prompt, correct cursor alignment for wide characters, syntax highlighting for languages other than Rust. In the git view: wide-character alignment, mouse, word-level diffs, a configurable refresh rate. Buffers: closing or saving from the buffer list, jumping by number, reopening a closed buffer, reloading buffers on disk change when they are not reopened. In the file tree: a sidebar next to the editor, status marks, create/rename/delete, filtering/search, a hidden-file toggle.
 
 ## History
 

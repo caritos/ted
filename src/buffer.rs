@@ -1158,6 +1158,7 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     result
 }
 
+mod lines;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -1170,3 +1171,5 @@ mod replace_tests;
 mod indent_tests;
 #[cfg(test)]
 mod word_tests;
+#[cfg(test)]
+mod lines_tests;

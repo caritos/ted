@@ -70,6 +70,10 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | Enter | New line, indented like the line you leave (its leading spaces and tabs, only as far as the cursor is; a selection is replaced; one undo step) |
 | Alt-Left / Alt-Right | Move by word (Ctrl-Left / Ctrl-Right too; Alt-B / Alt-F is what macOS Terminal sends for Option+arrows; with Shift the selection grows). A word is letters, digits and `_`; punctuation and line breaks are skipped |
 | Alt-Backspace / Alt-D | Delete the previous / next word (Ctrl-Backspace / Ctrl-Delete too; with a selection, just the selection); one undo step |
+| Ctrl-D | Duplicate the line below itself (the cursor moves onto the copy) |
+| Alt-K | Delete the line, break included |
+| Alt-Up / Alt-Down | Move the line up / down (the cursor follows) |
+| Alt-/ or Ctrl-/ | Comment / uncomment the line with the file type's prefix (`//` for Rust, C, JS, TS, Go, Swift, Java, Kotlin...; `#` for Python, shell, Ruby, TOML, YAML...; `--` for SQL, Lua, Haskell). Comments at the shallowest indent, skips blank lines, and uncomments only when every non-blank line is commented. Ctrl-/ depends on the terminal (it may arrive as Ctrl-7 or Ctrl-_, both accepted) |
 | Tab | Insert 4 spaces (an existing tab character is drawn up to the next multiple of 4) |
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |
@@ -117,6 +121,7 @@ Ctrl-X opens a `Command:` prompt in the message row (editor only; it does nothin
 |---|---|
 | `save` (`w`) | Save, like Ctrl-S |
 | `undo` / `redo` | Like Ctrl-Z / Ctrl-Y (`u` = `undo`, `red` = `redo`; `re` and `r` are ambiguous with `replace`) |
+| `duplicate`, `deleteline`, `moveup`, `movedown` | The line operations above, for terminals where Option does not send Alt (`d` and `m` are ambiguous; use `du`, `del`, `moveu`, `moved`). With a selection they act on every row it touches (a selection ending at column 0 leaves that row out); each is one undo step |
 | `open` | Open a file by name, like Ctrl-E |
 | `grep` | Find text in all files, like F4 |
 | `replace` | Open the Replace prompt, like Ctrl-R |

@@ -594,6 +594,14 @@ impl Editor {
             KeyCode::Char('y') if ctrl => self.redo(),
             KeyCode::F(3) => self.find_again(),
             KeyCode::Char('a') if ctrl => self.buffer.select_all(),
+            // Whole lines. Ctrl-/ reaches a terminal as 0x1f, which crossterm
+            // reports as Ctrl-7 (or Ctrl-_ in some terminals).
+            KeyCode::Char('d') if ctrl => self.duplicate_lines(),
+            KeyCode::Char('k') if alt && !ctrl => self.delete_lines(),
+            KeyCode::Up if alt && !ctrl => self.move_lines(true),
+            KeyCode::Down if alt && !ctrl => self.move_lines(false),
+            KeyCode::Char('/') if alt || ctrl => self.toggle_comment(),
+            KeyCode::Char('_' | '7') if ctrl => self.toggle_comment(),
             // Word moves: Option/Alt or Ctrl with the arrows; macOS terminals
             // send Option+Left / Right as Alt-b / Alt-f.
             KeyCode::Left if ctrl || alt => self.buffer.move_word_left_select(select),
@@ -843,6 +851,36 @@ impl Editor {
         }
     }
 
+    /// Ctrl-D: copies the cursor's row (or the selected rows) below.
+    pub fn duplicate_lines(&mut self) {
+        self.buffer.duplicate_lines();
+    }
+
+    /// Alt-K: deletes the cursor's row (or the selected rows).
+    pub fn delete_lines(&mut self) {
+        self.buffer.delete_lines();
+    }
+
+    /// Alt-Up / Alt-Down: moves the row (or the selected rows) one row.
+    pub fn move_lines(&mut self, up: bool) {
+        if up {
+            self.buffer.move_lines_up();
+        } else {
+            self.buffer.move_lines_down();
+        }
+    }
+
+    /// Alt-/: comments or uncomments the rows with the file type's prefix.
+    pub fn toggle_comment(&mut self) {
+        let Some(prefix) = self.buffer.path().and_then(crate::highlight::comment_prefix) else {
+            self.message = "No comment syntax for this file".to_string();
+            return;
+        };
+        if !self.buffer.toggle_comment(prefix) {
+            self.message = "Nothing to comment".to_string();
+        }
+    }
+
     /// Redoes the last undone step; says so when there is nothing to redo.
     pub fn redo(&mut self) {
         if !self.buffer.redo() {
@@ -947,3 +985,5 @@ mod undo_tests;
 mod indent_tests;
 #[cfg(test)]
 mod word_tests;
+#[cfg(test)]
+mod lineops_tests;

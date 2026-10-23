@@ -1177,6 +1177,32 @@ finally:
             pass
     shutil.rmtree(fp, ignore_errors=True)
 
+# 29. line operations on a .rs file `a b c`: Ctrl-D duplicates `a`, Alt-Down
+# (ESC [ 1 ; 3 B) moves the copy below `b`, Alt-/ (ESC /) comments it, save;
+# then Alt-K (ESC k) deletes it again, save.
+path_lo = os.path.join(tmp, "lines.rs")
+with open(path_lo, "w") as f:
+    f.write("a\nb\nc\n")
+pid, fd = spawn([path_lo])
+drain(fd)
+send(fd, b"\x04")
+send(fd, b"\x1b[1;3B")
+send(fd, b"\x1b/")
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+saved = open(path_lo).read()
+check("lines: duplicate, move down and comment", saved == "a\nb\n// a\nc\n", repr(saved))
+send(fd, b"\x1bk")
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+saved = open(path_lo).read()
+check("lines: Alt-K deletes the line", saved == "a\nb\nc\n", repr(saved))
+send(fd, CTRL_Q)
+drain(fd)
+check("lines: exit 0", wait_exit(pid) == 0)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

@@ -199,7 +199,7 @@ fn help_from_the_commit_picker_returns_to_the_open_picker() {
 fn help_lists_its_own_keys_and_printable_insert() {
     let mut app = text_app("one", one_file());
     app.handle_key(f1(), t(1000));
-    let all: String = (0..50).map(|i| format!("{}\n", row_text_or_empty(&app.screen(80, 60, t(1000)), i))).collect();
+    let all: String = (0..70).map(|i| format!("{}\n", row_text_or_empty(&app.screen(80, 80, t(1000)), i))).collect();
     assert!(all.contains("Printable keys"), "{all}");
     assert!(all.contains("Help"), "{all}");
 }

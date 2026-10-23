@@ -45,6 +45,7 @@ mod clipboard;
 mod command;
 mod finder;
 mod grep;
+mod lineops;
 mod gutter;
 mod help;
 mod replace;

@@ -69,6 +69,22 @@ struct Prompt {
     replace_term: Option<String>,
     /// Replace only: the selection when the prompt opened; the scope.
     within: Option<((usize, usize), (usize, usize))>,
+    /// Replace only: ask before each match (`qreplace`) instead of replacing all.
+    ask: bool,
+    /// Replace only: the per-match questions, once the `With:` step is accepted.
+    session: Option<AskSession>,
+}
+
+/// An interactive replace in progress. The buffer is not touched until the
+/// end, so the whole session is one undo step.
+struct AskSession {
+    /// Every match, in document order, and its length in chars.
+    positions: Vec<(usize, usize)>,
+    len: usize,
+    /// The match being asked about.
+    next: usize,
+    accepted: Vec<(usize, usize)>,
+    with: String,
 }
 
 pub struct Editor {
@@ -230,6 +246,8 @@ impl Editor {
             status: FindStatus::Normal,
             replace_term: None,
             within: if kind == PromptKind::Replace { self.buffer.selection() } else { None },
+            ask: false,
+            session: None,
         };
         if kind == PromptKind::Find && !self.last_search.is_empty() {
             prompt.text = self.last_search.clone();
@@ -245,6 +263,77 @@ impl Editor {
     /// Opens the Replace prompt (Ctrl-R, the `replace` command).
     pub fn open_replace(&mut self) {
         self.open_prompt(PromptKind::Replace);
+    }
+
+    /// Opens the Replace prompt in ask mode (the `qreplace` command): after
+    /// the `With:` step each match is shown and confirmed with y / n / a / q.
+    pub fn open_replace_ask(&mut self) {
+        self.open_prompt(PromptKind::Replace);
+        if let Some(prompt) = self.prompt.as_mut() {
+            prompt.ask = true;
+        }
+    }
+
+    /// Shows the match being asked about: selected, with the cursor at its end.
+    fn show_asked(&mut self, session: &AskSession) {
+        let (row, col) = session.positions[session.next];
+        self.buffer.set_cursor(row, col + session.len);
+        self.buffer.restore_selection(Some((row, col)));
+    }
+
+    /// One answer to `Replace?`: y replaces this match, n skips it, a
+    /// replaces it and all the rest, q / Esc stop. Anything else is ignored.
+    fn ask_key(&mut self, mut prompt: Prompt, key: KeyEvent) {
+        let Some(mut session) = prompt.session.take() else {
+            return;
+        };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let here = session.positions[session.next];
+        let mut done = false;
+        match key.code {
+            KeyCode::Char(c) if !ctrl => match c.to_ascii_lowercase() {
+                'y' => session.accepted.push(here),
+                'n' => {}
+                'a' => {
+                    session.accepted.extend_from_slice(&session.positions[session.next..]);
+                    done = true;
+                }
+                'q' => done = true,
+                _ => {
+                    prompt.session = Some(session);
+                    self.prompt = Some(prompt);
+                    return;
+                }
+            },
+            KeyCode::Esc => done = true,
+            _ => {
+                prompt.session = Some(session);
+                self.prompt = Some(prompt);
+                return;
+            }
+        }
+        session.next += 1;
+        if done || session.next >= session.positions.len() {
+            self.finish_ask(&prompt, &session);
+        } else {
+            self.show_asked(&session);
+            prompt.session = Some(session);
+            self.prompt = Some(prompt);
+        }
+    }
+
+    /// Applies the chosen matches as one edit; with none chosen the cursor,
+    /// scroll and selection go back as after Esc.
+    fn finish_ask(&mut self, prompt: &Prompt, session: &AskSession) {
+        let total = session.positions.len();
+        let n = self.buffer.replace_matches(&session.accepted, session.len, &session.with);
+        if n == 0 {
+            self.cancel(prompt);
+        } else {
+            self.buffer.clear_selection();
+        }
+        let s = if total == 1 { "" } else { "s" };
+        self.message = format!("Replaced {n} of {total} occurrence{s}");
     }
 
     /// Incremental search: always from where the prompt opened.
@@ -283,6 +372,9 @@ impl Editor {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let find = prompt.kind == PromptKind::Find;
+        if prompt.session.is_some() {
+            return self.ask_key(prompt, key);
+        }
         match key.code {
             KeyCode::Esc => {
                 self.cancel(&prompt);
@@ -323,6 +415,27 @@ impl Editor {
                             // Step two: the new text, empty allowed.
                             prompt.replace_term = Some(std::mem::take(&mut prompt.text));
                             self.prompt = Some(prompt);
+                        }
+                        Some(term) if prompt.ask => {
+                            let (positions, len) = self.buffer.find_matches(&term, prompt.within);
+                            self.accepted_search = Some(term.clone());
+                            self.last_search = term.clone();
+                            if positions.is_empty() {
+                                self.cancel(&prompt);
+                                let scope = if prompt.within.is_some() { " in selection" } else { "" };
+                                self.message = format!("Not found{scope}: {term}");
+                            } else {
+                                let session = AskSession {
+                                    positions,
+                                    len,
+                                    next: 0,
+                                    accepted: Vec::new(),
+                                    with: std::mem::take(&mut prompt.text),
+                                };
+                                self.show_asked(&session);
+                                prompt.session = Some(session);
+                                self.prompt = Some(prompt);
+                            }
                         }
                         Some(term) => {
                             let n = self.buffer.replace_all(&term, &prompt.text, prompt.within);
@@ -436,6 +549,10 @@ impl Editor {
                     }
                 }
                 line
+            }
+            PromptKind::Replace if prompt.session.is_some() => {
+                let s = prompt.session.as_ref().unwrap();
+                format!("Replace? (y)es (n)o (a)ll (q)uit [{}/{}]", s.next + 1, s.positions.len())
             }
             PromptKind::Replace => match &prompt.replace_term {
                 None => format!("Replace: {}_", prompt.text),
@@ -804,6 +921,8 @@ mod command_tests;
 mod gutter_tests;
 #[cfg(test)]
 mod prompt_tests;
+#[cfg(test)]
+mod qreplace_tests;
 #[cfg(test)]
 mod replace_tests;
 #[cfg(test)]

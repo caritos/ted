@@ -137,3 +137,36 @@ fn the_highlight_reaches_the_screen_while_finding() {
     let screen = app.screen(40, 6, t(1000));
     assert!(screen.rows.iter().flatten().all(|s| s.style != Style::Match));
 }
+
+fn qreplace(app: &mut App, term: &str, with: &str) {
+    app.handle_key(ctrl('x'), t(1000));
+    type_str(app, "qreplace");
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    type_str(app, term);
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    type_str(app, with);
+    app.handle_key(key(KeyCode::Enter), t(1000));
+}
+
+#[test]
+fn the_qreplace_command_asks_for_each_match() {
+    let mut app = text_app("foo bar\nfoo", FakeGit::new());
+    qreplace(&mut app, "foo", "baz");
+    assert_eq!(msg(&mut app), "Replace? (y)es (n)o (a)ll (q)uit [1/2]");
+    app.handle_key(key(KeyCode::Char('n')), t(1000));
+    app.handle_key(key(KeyCode::Char('y')), t(1000));
+    assert_eq!(app.editor().buffer().text(), "foo bar\nbaz");
+    assert_eq!(msg(&mut app), "Replaced 1 of 2 occurrences");
+    // The term is the shared search term, as after Ctrl-R.
+    app.handle_key(ctrl('f'), t(1000));
+    assert!(msg(&mut app).starts_with("Find: foo"), "{}", msg(&mut app));
+}
+
+#[test]
+fn ctrl_q_during_the_questions_cancels_and_follows_the_quit_rules() {
+    let mut app = text_app("foo foo", FakeGit::new());
+    qreplace(&mut app, "foo", "x");
+    app.handle_key(key(KeyCode::Char('y')), t(1000));
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+    assert_eq!(app.editor().buffer().text(), "foo foo");
+}

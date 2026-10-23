@@ -294,3 +294,49 @@ fn a_huge_replace_is_fast_and_one_step() {
     assert!(b.undo());
     assert_eq!(b.text().len(), text.len());
 }
+
+// --- find_matches / replace_matches ------------------------------------------
+
+#[test]
+fn find_matches_lists_every_match_in_order_with_its_length() {
+    let b = Buffer::from_text("foo x foo\nnone\nFOOfoo");
+    assert_eq!(b.find_matches("foo", None), (vec![(0, 0), (0, 6), (2, 0), (2, 3)], 3));
+    assert!(b.find_matches("Foo", None).0.is_empty());
+    assert!(b.find_matches("", None).0.is_empty());
+}
+
+#[test]
+fn find_matches_respects_the_scope() {
+    let b = Buffer::from_text("foo foo\nfoo foo");
+    assert_eq!(b.find_matches("foo", Some(((0, 4), (1, 3)))).0, vec![(0, 4), (1, 0)]);
+}
+
+#[test]
+fn replace_matches_replaces_only_the_given_ones_as_one_undo_step() {
+    let mut b = Buffer::from_text("foo a foo\nb foo\nfoo");
+    let (all, len) = b.find_matches("foo", None);
+    assert_eq!(b.replace_matches(&[all[0], all[2]], len, "XY"), 2);
+    assert_eq!(b.text(), "XY a foo\nb XY\nfoo");
+    assert!(b.is_modified());
+    assert!(b.undo());
+    assert_eq!(b.text(), "foo a foo\nb foo\nfoo");
+    assert!(!b.undo(), "one step only");
+}
+
+#[test]
+fn replace_matches_with_nothing_changes_nothing() {
+    let mut b = Buffer::from_text("foo");
+    assert_eq!(b.replace_matches(&[], 3, "x"), 0);
+    assert!(!b.is_modified());
+}
+
+#[test]
+fn replace_matches_may_delete_and_may_add_line_breaks() {
+    let mut b = Buffer::from_text("a foo b foo");
+    let (all, len) = b.find_matches("foo", None);
+    b.replace_matches(&all, len, "");
+    assert_eq!(b.text(), "a  b ");
+    b.undo();
+    b.replace_matches(&all, len, "1\n2");
+    assert_eq!(b.text(), "a 1\n2 b 1\n2");
+}

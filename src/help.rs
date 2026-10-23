@@ -61,6 +61,8 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
         "Replace prompt",
         &[
             ("Enter", "Replace: term, then With: text; Enter again replaces"),
+            ("qreplace", "Command: same, but ask for each match"),
+            ("y / n / a / q", "Ask mode: replace / skip / replace rest / stop"),
             ("Esc", "Cancel; nothing changes"),
         ],
     ),

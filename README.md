@@ -191,7 +191,7 @@ Known simplifications:
 ## Testing
 
 ```
-cargo test                                   # 480 unit tests
+cargo test                                   # 543 unit tests
 cargo clippy --all-targets                   # clean
 cargo build --release && python3 -I scripts/pty_smoke.py target/release/ted
 ```

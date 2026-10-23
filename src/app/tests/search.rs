@@ -155,10 +155,55 @@ fn term_accepted_in_one_buffer_prefills_in_the_next() {
 fn f3_in_another_buffer_uses_the_shared_term_from_its_own_cursor() {
     let dir = Temp::new("shared-f3");
     let mut app = two_buffers(&dir);
+    // a.txt's cursor sits at (1, 0); b.txt's own cursor goes to (2, 0), so F3
+    // must wrap to (1, 0) (searching from a.txt's cursor would give (2, 0)).
+    app.handle_key(key(KeyCode::Down), t(1000));
+    app.handle_key(key(KeyCode::Down), t(1000));
+    assert_eq!(app.editor().buffer().cursor(), (2, 0));
     app.handle_key(key(KeyCode::F(3)), t(1000));
     assert_eq!(app.editor().buffer().cursor(), (1, 0));
     app.handle_key(key(KeyCode::F(3)), t(1000));
     assert_eq!(app.editor().buffer().cursor(), (2, 0));
+}
+
+#[test]
+fn ctrl_q_cancelling_a_find_prompt_keeps_the_shared_term() {
+    let dir = Temp::new("shared-ctrl-q");
+    let mut app = two_buffers(&dir);
+    app.handle_key(ctrl('f'), t(1000));
+    app.handle_key(key(KeyCode::Backspace), t(1000));
+    type_str(&mut app, "x");
+    // Nothing modified: Ctrl-Q cancels the prompt and quits.
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Quit);
+
+    let mut app = two_buffers(&dir);
+    type_str(&mut app, "Z");
+    app.handle_key(ctrl('f'), t(1000));
+    app.handle_key(key(KeyCode::Backspace), t(1000));
+    type_str(&mut app, "x");
+    // Modified: Ctrl-Q cancels the prompt and warns instead of quitting.
+    assert_eq!(app.handle_key(ctrl('q'), t(1000)), Flow::Continue);
+    assert!(!app.editor().in_prompt());
+    assert!(msg(&mut app).contains("Unsaved changes in 1 buffer"));
+    app.handle_key(ctrl('p'), t(1000));
+    app.handle_key(ctrl('f'), t(1000));
+    assert_eq!(msg(&mut app), "Find: foo_");
+}
+
+#[test]
+fn second_file_opened_from_the_git_view_gets_the_term() {
+    let dir = Temp::new("shared-git-open");
+    dir.file("a.txt", "one\nfoo a\n");
+    dir.file("b.txt", "zero\nfoo b\n");
+    let buffer = Buffer::open(&dir.0.join("b.txt")).unwrap();
+    let mut app = app_with(Editor::new(buffer), dir.0.clone(), one_file());
+    accept(&mut app, "foo");
+    app.handle_key(ctrl('g'), t(1000));
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    assert_eq!(app.buffer_count(), 2);
+    assert_eq!(app.current_index(), 1);
+    app.handle_key(ctrl('f'), t(1000));
+    assert_eq!(msg(&mut app), "Find: foo_");
 }
 
 #[test]

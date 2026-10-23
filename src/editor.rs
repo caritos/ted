@@ -594,6 +594,15 @@ impl Editor {
             KeyCode::Char('y') if ctrl => self.redo(),
             KeyCode::F(3) => self.find_again(),
             KeyCode::Char('a') if ctrl => self.buffer.select_all(),
+            // Word moves: Option/Alt or Ctrl with the arrows; macOS terminals
+            // send Option+Left / Right as Alt-b / Alt-f.
+            KeyCode::Left if ctrl || alt => self.buffer.move_word_left_select(select),
+            KeyCode::Right if ctrl || alt => self.buffer.move_word_right_select(select),
+            KeyCode::Char('b') if alt && !ctrl => self.buffer.move_word_left_select(select),
+            KeyCode::Char('f') if alt && !ctrl => self.buffer.move_word_right_select(select),
+            KeyCode::Backspace if ctrl || alt => self.buffer.delete_word_left(),
+            KeyCode::Delete if ctrl || alt => self.buffer.delete_word_right(),
+            KeyCode::Char('d') if alt && !ctrl => self.buffer.delete_word_right(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline_indent(),
             KeyCode::Backspace => self.buffer.backspace(),
@@ -936,3 +945,5 @@ mod tests;
 mod undo_tests;
 #[cfg(test)]
 mod indent_tests;
+#[cfg(test)]
+mod word_tests;

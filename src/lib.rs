@@ -1,6 +1,7 @@
 pub mod app;
 pub mod buffer;
 pub mod bufferlist;
+pub mod clipboard;
 pub mod command;
 pub mod editor;
 pub mod filetree;

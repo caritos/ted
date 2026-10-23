@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
 use crate::bufferlist::{BufferList, ListAction};
+use crate::clipboard::{Clipboard, ClipboardRead, SystemClipboard};
 use crate::command::{self, Command};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
@@ -58,13 +59,33 @@ pub struct App {
     line_numbers: bool,
     /// The last accepted search term, shared by every buffer.
     search: String,
+    clipboard: Box<dyn Clipboard>,
+    /// What the last copy or cut took; paste falls back to it when the
+    /// system clipboard has no text.
+    register: String,
+    /// The last copy or cut did not reach the system clipboard, so the
+    /// register is newer than whatever the clipboard holds.
+    register_newer: bool,
 }
 
 impl App {
-    pub fn new(mut editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
+    /// An app that uses the system clipboard.
+    pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
+        Self::with_clipboard(editor, location, git, Box::new(SystemClipboard::new()))
+    }
+
+    pub fn with_clipboard(
+        mut editor: Editor,
+        location: PathBuf,
+        git: Box<dyn Git>,
+        clipboard: Box<dyn Clipboard>,
+    ) -> Self {
         // One-time hint; the first key clears it like any message.
         editor.set_message("F1: help".to_string());
         App {
+            clipboard,
+            register: String::new(),
+            register_newer: false,
             editors: vec![editor],
             current: 0,
             location,
@@ -128,11 +149,20 @@ impl App {
         self.current
     }
 
+    /// Makes buffer `i` the showing one; the selection of the buffer left and
+    /// of the one entered is dropped.
+    fn set_current(&mut self, i: usize) {
+        self.editors[self.current].clear_selection();
+        self.current = i;
+        self.editors[i].clear_selection();
+    }
+
     /// Switches to the next (`forward`) or previous buffer, wrapping, and
     /// returns to the editor.
     fn cycle(&mut self, forward: bool) {
         let n = self.editors.len();
-        self.current = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
+        let next = if forward { (self.current + 1) % n } else { (self.current + n - 1) % n };
+        self.set_current(next);
         self.close_picker();
         self.mode = Mode::Editor;
     }
@@ -160,6 +190,7 @@ impl App {
             self.editors.push(Editor::new(Buffer::new()));
         }
         self.current = self.current.saturating_sub(1);
+        self.editors[self.current].clear_selection();
     }
 
     /// Quits at once when no buffer is modified; otherwise warns, and a
@@ -257,6 +288,16 @@ impl App {
                 self.line_numbers = !self.line_numbers;
                 return Flow::Continue;
             }
+            // Not in a prompt (it took the key above) and not in a view.
+            if ctrl && matches!(key.code, KeyCode::Char('c' | 'k' | 'v')) {
+                self.editor_mut().set_message(String::new());
+                match key.code {
+                    KeyCode::Char('c') => self.copy(),
+                    KeyCode::Char('k') => self.cut(),
+                    _ => self.paste_clipboard(),
+                }
+                return Flow::Continue;
+            }
             let flow = self.editor_mut().handle_key(key);
             return self.finish_key(flow, now);
         }
@@ -297,7 +338,7 @@ impl App {
                     ListAction::None => {}
                     ListAction::Back => self.mode = Mode::Editor,
                     ListAction::Switch(i) => {
-                        self.current = i.min(n - 1);
+                        self.set_current(i.min(n - 1));
                         self.mode = Mode::Editor;
                     }
                     ListAction::ToggleGit => self.enter_git_view(now),
@@ -315,6 +356,93 @@ impl App {
             },
         }
         Flow::Continue
+    }
+
+    /// Remembers `text` as the last copy: in the register always, in the
+    /// system clipboard when that works.
+    /// False when the system clipboard did not get it ("ted only").
+    fn store(&mut self, text: &str) -> bool {
+        self.register.clear();
+        self.register.push_str(text);
+        let stored = self.clipboard.set(text);
+        self.register_newer = !stored;
+        stored
+    }
+
+    /// Ctrl-C / `copy`: the selection goes to the clipboard; text and
+    /// selection stay.
+    fn copy(&mut self) {
+        match self.editor().selected_text() {
+            Some(text) => {
+                let note = if self.store(&text) { "" } else { " (ted only)" };
+                let message = format!("Copied {} chars{note}", text.chars().count());
+                self.editor_mut().set_message(message);
+            }
+            None => self.editor_mut().set_message("Nothing selected".to_string()),
+        }
+    }
+
+    /// Ctrl-K / `cut`: like copy, then the selection is deleted (one undo step).
+    fn cut(&mut self) {
+        match self.editor_mut().cut_selection() {
+            Some(text) => {
+                let note = if self.store(&text) { "" } else { " (ted only)" };
+                let message = format!("Cut {} chars{note}", text.chars().count());
+                self.editor_mut().set_message(message);
+            }
+            None => self.editor_mut().set_message("Nothing selected".to_string()),
+        }
+    }
+
+    /// Ctrl-V / `paste`: the system clipboard's text. The register stands in
+    /// only when there is no clipboard tool at all, or when the last copy
+    /// never reached the system clipboard and the system has nothing newer to
+    /// say. An empty, non-text or unreadable clipboard pastes nothing: the
+    /// register may be stale (an image was copied elsewhere since).
+    fn paste_clipboard(&mut self) {
+        let newer = self.register_newer;
+        let text = match self.clipboard.get() {
+            ClipboardRead::Text(text) => {
+                self.register_newer = false;
+                text
+            }
+            ClipboardRead::Unavailable => self.register.clone(),
+            ClipboardRead::Empty if newer => self.register.clone(),
+            ClipboardRead::Failed if newer => self.register.clone(),
+            ClipboardRead::Empty => return self.editor_mut().set_message("Clipboard has no text".to_string()),
+            ClipboardRead::Failed => return self.editor_mut().set_message("Clipboard read failed".to_string()),
+            ClipboardRead::TooLarge => return self.editor_mut().set_message("Clipboard too large".to_string()),
+        };
+        if text.is_empty() {
+            self.editor_mut().set_message("Nothing to paste".to_string());
+        } else {
+            self.editor_mut().insert_text(&normalize_breaks(&text));
+        }
+    }
+
+    /// Text that arrived in one piece (the terminal's bracketed paste). In
+    /// the editor it is inserted whole as one undo step; in an open prompt it
+    /// goes into the prompt without line breaks (so it can never run a
+    /// command); the views and help ignore it.
+    pub fn paste(&mut self, text: &str) {
+        if self.mode != Mode::Editor {
+            return;
+        }
+        // Like any key: the startup hint goes, pending warnings are withdrawn.
+        if std::mem::take(&mut self.hint_pending) {
+            for editor in &mut self.editors {
+                if editor.message() == "F1: help" {
+                    editor.set_message(String::new());
+                }
+            }
+        }
+        self.quit_armed = false;
+        self.close_armed = false;
+        self.editor_mut().set_message(String::new());
+        if self.editor_mut().paste_into_prompt(text) || text.is_empty() {
+            return;
+        }
+        self.editor_mut().insert_text(&normalize_breaks(text));
     }
 
     /// After the editor handled a key: runs the command the key accepted, if any.
@@ -354,6 +482,10 @@ impl App {
             Command::Help => self.enter_help(),
             Command::Undo => self.editor_mut().undo(),
             Command::Redo => self.editor_mut().redo(),
+            Command::Copy => self.copy(),
+            Command::Cut => self.cut(),
+            Command::Paste => self.paste_clipboard(),
+            Command::SelectAll => self.editor_mut().select_all(),
             Command::Quit => return self.quit(),
             Command::WriteQuit => {
                 self.editor_mut().save();
@@ -473,7 +605,7 @@ impl App {
     fn open(&mut self, rel: &str) {
         let path = self.location.join(rel);
         if let Some(i) = self.position_of(&path) {
-            self.current = i;
+            self.set_current(i);
             self.mode = Mode::Editor;
             // A buffer with edits keeps them and is not read again. An
             // unedited one is refreshed from disk, unless the disk text is
@@ -515,6 +647,7 @@ impl App {
             self.editors[0] = Editor::new(buffer);
             self.current = 0;
         } else {
+            self.editors[self.current].clear_selection();
             self.editors.push(Editor::new(buffer));
             self.current = self.editors.len() - 1;
         }
@@ -537,6 +670,15 @@ impl App {
         }
         Buffer::open(path).map_err(|e| format!("Open failed: {e}"))
     }
+}
+
+/// Pasted text with CRLF and lone CR turned into `\n` (tabs and everything
+/// else stay as they are).
+fn normalize_breaks(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('\r') {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
 /// A buffer's row in the buffer list: file name (or `[No Name]`), modified.

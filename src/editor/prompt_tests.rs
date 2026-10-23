@@ -544,3 +544,54 @@ fn set_last_search_prefills_and_drives_f3() {
     e.handle_key(ctrl('f'));
     assert_eq!(e.view(40, 6).message, "Find: foo_");
 }
+
+#[test]
+fn a_long_prompt_shows_its_tail_with_the_cursor_mark() {
+    for open in ['f', 'l', 'x'] {
+        let mut e = ed("abc");
+        e.handle_key(ctrl(open));
+        let text = if open == 'l' { "1234567890".repeat(410) } else { "abcdefghij".repeat(410) };
+        assert_eq!(text.len(), 4100);
+        assert!(e.paste_into_prompt(&text));
+        for width in [40usize, 20, 12] {
+            let message = e.view(width, 5).message;
+            assert_eq!(message.chars().count(), width, "{open} {width}");
+            assert!(message.starts_with('…'), "{message}");
+            if open == 'x' || open == 'l' {
+                assert!(message.ends_with('_'), "{message}");
+                let body: String = message.chars().skip(1).collect();
+                // A prompt takes at most 4096 chars of a paste.
+                assert!(text[..4096].ends_with(body.trim_end_matches('_')), "{message}");
+            } else {
+                // Find: the end of the line is the "(not found)" status.
+                assert!(message.ends_with("(not found)"), "{message}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_short_prompt_is_not_cut_and_tiny_sizes_are_safe() {
+    let mut e = ed("abc");
+    e.handle_key(ctrl('f'));
+    type_str(&mut e, "ab");
+    assert_eq!(e.view(40, 5).message, "Find: ab_");
+    e.paste_into_prompt(&"z".repeat(500));
+    for w in 0..=6 {
+        for h in 0..=6 {
+            let message = e.view(w, h).message;
+            assert!(message.chars().count() <= w);
+        }
+    }
+    assert_eq!(e.view(1, 5).message, "…");
+}
+
+#[test]
+fn a_long_prompt_with_hostile_text_stays_sanitized() {
+    let mut e = ed("abc");
+    e.handle_key(ctrl('x'));
+    e.paste_into_prompt(&format!("{}\x1b[31m\u{9b}", "q".repeat(100)));
+    let message = e.view(30, 5).message;
+    assert!(!message.chars().any(char::is_control), "{message:?}");
+    assert!(message.ends_with("?[31m?_"), "{message:?}");
+}

@@ -38,6 +38,16 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
     // Right after Editor so Ctrl-Q is on the first screen of a 24-row terminal.
     ("Quit", &[("Ctrl-Q", "Quit; with unsaved changes press it again")]),
     (
+        "Selection and clipboard",
+        &[
+            ("Shift + move keys", "Select (arrows, Home / End, PageUp / PageDown)"),
+            ("Ctrl-A", "Select everything"),
+            ("Ctrl-C / Ctrl-K", "Copy / cut the selection"),
+            ("Ctrl-V", "Paste (a terminal paste is one undo step)"),
+            ("Esc", "Clear the selection; typing replaces it"),
+        ],
+    ),
+    (
         "Find / go to line prompt",
         &[
             ("Enter", "Accept and stay at the match"),
@@ -194,10 +204,11 @@ mod tests {
         for name in [
             "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "Ctrl-X", "Ctrl-Z", "Ctrl-Y", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
             "Backspace", "Delete", "Enter", "F1", "F2", "Up", "Down", "Left", "Right", "Esc", "r", "b", "q",
+            "Ctrl-A", "Ctrl-C", "Ctrl-K", "Ctrl-V", "Shift + move keys",
         ] {
             assert!(keys.contains(&name), "help table lacks {name}");
         }
-        for title in ["Editor", "Help", "Files and buffers", "Views", "Quit"] {
+        for title in ["Editor", "Help", "Files and buffers", "Views", "Quit", "Selection and clipboard"] {
             assert!(HELP.iter().any(|(s, _)| *s == title), "no section {title}");
         }
     }

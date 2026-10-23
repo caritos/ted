@@ -22,11 +22,13 @@ def check(name, ok, detail=""):
         failures.append(name)
 
 
-def spawn(args, cwd=None):
+def spawn(args, cwd=None, path=None):
     pid, fd = pty.fork()
     if pid == 0:
         if cwd:
             os.chdir(cwd)
+        if path is not None:
+            os.environ["PATH"] = path
         os.environ["TERM"] = "xterm-256color"
         os.execv(BIN, [BIN] + args)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
@@ -832,6 +834,92 @@ finally:
         except OSError:
             pass
     shutil.rmtree(shr, ignore_errors=True)
+
+# 23. selection and clipboard. PATH holds no clipboard tool (an empty
+# directory), so copy/cut/paste use ted's in-memory register, whatever this
+# machine's clipboard holds. Shift+Right is ESC [ 1 ; 2 C; a bracketed paste is
+# ESC [ 200 ~ text ESC [ 201 ~.
+SHIFT_RIGHT, PASTE_START, PASTE_END = b"\x1b[1;2C", b"\x1b[200~", b"\x1b[201~"
+CTRL_A, CTRL_K, CTRL_V = b"\x01", b"\x0b", b"\x16"
+
+
+def last_frame(b):
+    return plain(b).split(b"\x1b[?25l")[-1]
+
+
+cp = tempfile.mkdtemp(prefix="ted-smoke-clip-")
+empty_path = tempfile.mkdtemp(prefix="ted-smoke-nopath-")
+pid = fd = None
+try:
+    p = os.path.join(cp, "c.txt")
+    original = "first line\nsecond line\nthird line\n"
+    with open(p, "w") as f:
+        f.write(original)
+    pid, fd = spawn([p], path=empty_path)
+    out = drain(fd)
+    check("clip: bracketed paste is enabled on entry", b"\x1b[?2004h" in out, out[:300])
+    for _ in range(3):
+        send(fd, SHIFT_RIGHT)
+    out = drain(fd)
+    check("clip: Shift+Right x3 draws a reversed span over 'fir'", b"\x1b[7mfir\x1b[" in out, out[-300:])
+    send(fd, b"X")
+    out = last_frame(drain(fd))
+    check("clip: typing replaces the selection", b"  1 Xst line" in out and b"[+]" in out, out[-300:])
+    send(fd, CTRL_Z)
+    out = last_frame(drain(fd))
+    check("clip: Ctrl-Z restores it (one step)", b"  1 first line" in out and b"[+]" not in out, out[-300:])
+    send(fd, CTRL_A)
+    send(fd, CTRL_K)
+    out = last_frame(drain(fd))
+    check("clip: Ctrl-A Ctrl-K cuts everything, status [+]", b"first line" not in out and b"third" not in out and b"[+]" in out, out[-300:])
+    check("clip: cut says how much", b"Cut 34 chars" in out, out[-300:])
+    send(fd, CTRL_V)
+    out = last_frame(drain(fd))
+    check(
+        "clip: Ctrl-V pastes it back (register fallback)",
+        b"  1 first line" in out and b"  2 second line" in out and b"  3 third line" in out,
+        out[-300:],
+    )
+    send(fd, CTRL_A)
+    send(fd, CTRL_K)
+    drain(fd)
+    send(fd, PASTE_START + b"p1\np2\np3" + PASTE_END)
+    out = last_frame(drain(fd))
+    check("clip: bracketed paste lands as three lines", b"  1 p1" in out and b"  2 p2" in out and b"  3 p3" in out, out[-300:])
+    send(fd, CTRL_Z)
+    out = last_frame(drain(fd))
+    check("clip: one Ctrl-Z removes the whole paste", b"p1" not in out and b"p2" not in out and b"p3" not in out, out[-300:])
+    send(fd, CTRL_X)
+    drain(fd)
+    send(fd, PASTE_START + b"wq\n" + PASTE_END)
+    out = last_frame(drain(fd))
+    check("clip: paste with a newline fills the command prompt", b"Command: wq_" in out, out[-300:])
+    check("clip: ...and does not run it", wait_exit(pid, 0.4) is None)
+    check("clip: ...nothing was saved", open(p).read() == original, open(p).read())
+    send(fd, ESC)
+    drain(fd)
+    send(fd, CTRL_Q)
+    drain(fd)
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("clip: exit 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(cp, ignore_errors=True)
+    shutil.rmtree(empty_path, ignore_errors=True)
 
 shutil.rmtree(tmp, ignore_errors=True)
 

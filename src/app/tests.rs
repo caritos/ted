@@ -38,11 +38,13 @@ impl Git for Shared {
     }
 }
 
+mod clipboard;
 mod command;
 mod gutter;
 mod help;
 mod saveas;
 mod search;
+mod selection;
 mod undo;
 
 fn key(code: KeyCode) -> KeyEvent {

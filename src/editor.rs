@@ -6,6 +6,14 @@ use crate::highlight::{highlight_line, Language, LineState, Token};
 use crate::screen::Style;
 use crate::text::{display_col, layout, sanitize_char, TAB_STOP};
 
+/// Longest text a prompt takes from a paste (chars).
+const MAX_PROMPT_TEXT: usize = 4096;
+
+/// Chars that end a line (the ones ropey also treats as breaks).
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}')
+}
+
 /// Page size before the first frame tells the editor the screen height.
 const DEFAULT_PAGE: usize = 20;
 
@@ -49,6 +57,9 @@ struct Prompt {
     /// Cursor and scroll (row, col) when the prompt opened; Esc restores them.
     origin: (usize, usize),
     scroll: (usize, usize),
+    /// Where the selection started when the prompt opened; Esc brings the
+    /// selection back (an accepted Find / Go to has cleared it).
+    anchor: Option<(usize, usize)>,
     /// Current match, the start for next/previous.
     current: Option<(usize, usize)>,
     status: FindStatus,
@@ -124,6 +135,58 @@ impl Editor {
         &self.message
     }
 
+    /// Drops the selection (the app does this when the buffer is left or shown).
+    pub fn clear_selection(&mut self) {
+        self.buffer.clear_selection();
+    }
+
+    /// The selected text, if any (copy).
+    pub fn selected_text(&self) -> Option<String> {
+        self.buffer.selected_text()
+    }
+
+    /// Deletes the selection as one undo step and returns its text (cut);
+    /// `None` and no change when nothing is selected.
+    pub fn cut_selection(&mut self) -> Option<String> {
+        let text = self.buffer.selected_text()?;
+        self.buffer.delete_selection();
+        self.message.clear();
+        Some(text)
+    }
+
+    /// Inserts `text` at the cursor, replacing the selection, as one undo
+    /// step (paste). The caller has normalised the line breaks.
+    pub fn insert_text(&mut self, text: &str) {
+        self.message.clear();
+        self.buffer.insert_str(text);
+    }
+
+    pub fn select_all(&mut self) {
+        self.buffer.select_all();
+    }
+
+    /// Text arriving in one piece (bracketed paste) while a prompt is open:
+    /// line breaks never get in, so a paste cannot accept the prompt; a Go to
+    /// prompt keeps only digits. Returns false when no prompt is open.
+    pub fn paste_into_prompt(&mut self, text: &str) -> bool {
+        let Some(mut prompt) = self.prompt.take() else {
+            return false;
+        };
+        let room = MAX_PROMPT_TEXT.saturating_sub(prompt.text.chars().count());
+        let added: String = match prompt.kind {
+            PromptKind::Goto => text.chars().filter(char::is_ascii_digit).take(room).collect(),
+            _ => text.chars().filter(|&c| !is_line_break(c)).take(room).collect(),
+        };
+        if !added.is_empty() {
+            prompt.text.push_str(&added);
+            if prompt.kind == PromptKind::Find {
+                self.search_from_origin(&mut prompt);
+            }
+        }
+        self.prompt = Some(prompt);
+        true
+    }
+
     pub fn in_prompt(&self) -> bool {
         self.prompt.is_some()
     }
@@ -131,8 +194,14 @@ impl Editor {
     /// Closes an open prompt as Esc does: cursor and scroll go back.
     pub fn cancel_prompt(&mut self) {
         if let Some(prompt) = self.prompt.take() {
-            self.restore_origin(&prompt);
+            self.cancel(&prompt);
         }
+    }
+
+    /// Esc: cursor, scroll and selection go back to how they were.
+    fn cancel(&mut self, prompt: &Prompt) {
+        self.restore_origin(prompt);
+        self.buffer.restore_selection(prompt.anchor);
     }
 
     fn restore_origin(&mut self, prompt: &Prompt) {
@@ -150,6 +219,7 @@ impl Editor {
             text: String::new(),
             origin: self.buffer.cursor(),
             scroll: (self.scroll_row, self.scroll_col),
+            anchor: self.buffer.selection_anchor(),
             current: None,
             status: FindStatus::Normal,
         };
@@ -198,14 +268,19 @@ impl Editor {
         let find = prompt.kind == PromptKind::Find;
         match key.code {
             KeyCode::Esc => {
-                self.restore_origin(&prompt);
+                self.cancel(&prompt);
                 return;
             }
             KeyCode::Enter => {
+                // Accepting a search or a jump that moves on clears the
+                // selection; one that moves nowhere acts like Esc and keeps
+                // it; a command may still act on it.
                 match prompt.kind {
                     PromptKind::Find => {
-                        if prompt.status == FindStatus::NotFound {
-                            self.restore_origin(&prompt);
+                        if prompt.status == FindStatus::NotFound || prompt.text.is_empty() {
+                            self.cancel(&prompt);
+                        } else {
+                            self.buffer.clear_selection();
                         }
                         if !prompt.text.is_empty() {
                             self.accepted_search = Some(prompt.text.clone());
@@ -216,6 +291,8 @@ impl Editor {
                         let n = prompt.text.parse::<usize>().unwrap_or(usize::MAX);
                         if !prompt.text.is_empty() && n > 0 {
                             self.buffer.go_to_line(n);
+                        } else {
+                            self.cancel(&prompt);
                         }
                     }
                     PromptKind::Command => {
@@ -296,7 +373,18 @@ impl Editor {
         }
     }
 
-    fn prompt_line(&self, prompt: &Prompt) -> String {
+    /// The prompt row and how many of its chars (the label, the text and the
+    /// cursor mark) must stay visible; the rest is a hint that may be cut.
+    fn prompt_line(&self, prompt: &Prompt) -> (String, usize) {
+        let line = self.prompt_text(prompt);
+        let must = match prompt.kind {
+            PromptKind::Command => format!("Command: {}_", prompt.text).chars().count(),
+            _ => line.chars().count(),
+        };
+        (line, must)
+    }
+
+    fn prompt_text(&self, prompt: &Prompt) -> String {
         match prompt.kind {
             PromptKind::Goto => format!("Go to line: {}_", prompt.text),
             PromptKind::Command => {
@@ -328,6 +416,7 @@ impl Editor {
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let select = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
             KeyCode::Char('s') if ctrl => self.save(),
             KeyCode::Char('f') if ctrl => self.open_prompt(PromptKind::Find),
@@ -336,23 +425,30 @@ impl Editor {
             KeyCode::Char('z') if ctrl => self.undo(),
             KeyCode::Char('y') if ctrl => self.redo(),
             KeyCode::F(3) => self.find_again(),
+            KeyCode::Char('a') if ctrl => self.buffer.select_all(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline(),
             KeyCode::Backspace => self.buffer.backspace(),
             KeyCode::Delete => self.buffer.delete(),
+            KeyCode::Esc => self.buffer.clear_selection(),
             KeyCode::Tab => {
-                for _ in 0..TAB_STOP {
-                    self.buffer.insert_char(' ');
+                if self.buffer.selection().is_some() {
+                    // One undo step together with the deletion.
+                    self.buffer.insert_str(&" ".repeat(TAB_STOP));
+                } else {
+                    for _ in 0..TAB_STOP {
+                        self.buffer.insert_char(' ');
+                    }
                 }
             }
-            KeyCode::Left => self.buffer.move_left(),
-            KeyCode::Right => self.buffer.move_right(),
-            KeyCode::Up => self.buffer.move_up(),
-            KeyCode::Down => self.buffer.move_down(),
-            KeyCode::Home => self.buffer.move_home(),
-            KeyCode::End => self.buffer.move_end(),
-            KeyCode::PageUp => self.buffer.move_up_by(self.page),
-            KeyCode::PageDown => self.buffer.move_down_by(self.page),
+            KeyCode::Left => self.buffer.move_left_select(select),
+            KeyCode::Right => self.buffer.move_right_select(select),
+            KeyCode::Up => self.buffer.move_up_select(select),
+            KeyCode::Down => self.buffer.move_down_select(select),
+            KeyCode::Home => self.buffer.move_home_select(select),
+            KeyCode::End => self.buffer.move_end_select(select),
+            KeyCode::PageUp => self.buffer.move_up_by_select(self.page, select),
+            KeyCode::PageDown => self.buffer.move_down_by_select(self.page, select),
             _ => {}
         }
         Flow::Continue
@@ -400,6 +496,7 @@ impl Editor {
             }
         }
         let mut styles = self.styles(&text, &layouts);
+        self.mark_selection(&mut styles, &layouts);
         let mut lines = text;
         if gutter > 0 {
             let digits = gutter - 1;
@@ -420,7 +517,18 @@ impl Editor {
             styles,
             status: clip(&self.status_line(width), 0, width),
             message: match &self.prompt {
-                Some(prompt) => clip(&self.prompt_line(prompt), 0, width),
+                Some(prompt) => {
+                    // The label, text and cursor mark too long for the row:
+                    // show the end (where the typing happens), led by an
+                    // ellipsis. Only a cut hint list keeps the head.
+                    let (line, must) = self.prompt_line(prompt);
+                    let chars = line.chars().count();
+                    if must > width && width > 0 {
+                        format!("…{}", clip(&line, chars - (width - 1), width - 1))
+                    } else {
+                        clip(&line, 0, width)
+                    }
+                }
                 None => clip(&self.message, 0, width),
             },
             // With no text rows or no width the scroll is left alone, so the
@@ -429,6 +537,27 @@ impl Editor {
                 row.saturating_sub(self.scroll_row),
                 gutter + col.saturating_sub(self.scroll_col),
             ),
+        }
+    }
+
+    /// Draws the selection over `styles` (it wins over syntax colors). Each
+    /// line's selected cells are styled; a line break itself is not drawn.
+    fn mark_selection(&self, styles: &mut [Vec<Style>], layouts: &[Vec<usize>]) {
+        let Some((start, end)) = self.buffer.selection() else {
+            return;
+        };
+        for (i, (row_styles, cells)) in styles.iter_mut().zip(layouts).enumerate() {
+            let r = self.scroll_row + i;
+            if r < start.0 || r > end.0 {
+                continue;
+            }
+            let from = if r == start.0 { start.1 } else { 0 };
+            let to = if r == end.0 { end.1 } else { usize::MAX };
+            for (style, &c) in row_styles.iter_mut().zip(cells) {
+                if c >= from && c < to {
+                    *style = Style::Selected;
+                }
+            }
         }
     }
 
@@ -597,6 +726,8 @@ mod command_tests;
 mod gutter_tests;
 #[cfg(test)]
 mod prompt_tests;
+#[cfg(test)]
+mod selection_tests;
 #[cfg(test)]
 mod tab_tests;
 #[cfg(test)]

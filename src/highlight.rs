@@ -18,6 +18,16 @@ impl Language {
     }
 }
 
+/// The line-comment prefix for the file type (by extension), if known.
+pub fn comment_prefix(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()? {
+        "rs" | "js" | "jsx" | "ts" | "tsx" | "c" | "h" | "cc" | "cpp" | "hpp" | "java" | "go" | "swift" | "kt" | "cs" | "php" | "scala" | "dart" => Some("//"),
+        "py" | "sh" | "bash" | "zsh" | "rb" | "toml" | "yaml" | "yml" | "pl" | "r" | "mk" | "conf" => Some("#"),
+        "sql" | "lua" | "hs" | "elm" => Some("--"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Token {
     Plain,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::clipboard::MemoryClipboard;
+use crate::clipboard::{ClipboardRead, MemoryClipboard};
 
 fn shift(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::SHIFT)
@@ -84,10 +84,27 @@ fn copy_with_a_broken_clipboard_still_fills_the_register() {
     clip.set_broken(true);
     press(&mut app, shift(KeyCode::Right), 3);
     app.handle_key(ctrl('c'), t(1000));
-    assert_eq!(message(&app), "Copied 3 chars");
+    assert_eq!(message(&app), "Copied 3 chars (ted only)");
     app.handle_key(key(KeyCode::End), t(1000));
     app.handle_key(ctrl('v'), t(1000));
     assert_eq!(text(&app), "abc defabc");
+}
+
+#[test]
+fn copy_and_cut_say_ted_only_when_the_system_clipboard_was_not_updated() {
+    let (mut app, clip) = clip_app("abc def");
+    clip.set_writes_fail(true);
+    press(&mut app, shift(KeyCode::Right), 3);
+    app.handle_key(ctrl('c'), t(1000));
+    assert_eq!(message(&app), "Copied 3 chars (ted only)");
+    app.handle_key(ctrl('k'), t(1000));
+    assert_eq!(message(&app), "Cut 3 chars (ted only)");
+    assert_eq!(text(&app), " def");
+    assert_eq!(clip.contents(), None);
+    clip.set_writes_fail(false);
+    app.handle_key(ctrl('a'), t(1000));
+    app.handle_key(ctrl('c'), t(1000));
+    assert_eq!(message(&app), "Copied 4 chars");
 }
 
 // ---- cut ----
@@ -150,20 +167,101 @@ fn paste_replaces_a_selection_as_one_undo_step() {
 }
 
 #[test]
-fn paste_falls_back_to_the_register_when_the_clipboard_is_empty_or_unavailable() {
-    for how in ["none", "empty", "broken"] {
+fn paste_uses_the_register_only_when_no_clipboard_tool_exists() {
+    let (mut app, clip) = clip_app("ab");
+    press(&mut app, shift(KeyCode::Right), 1);
+    app.handle_key(ctrl('c'), t(1000));
+    clip.set_broken(true);
+    app.handle_key(key(KeyCode::End), t(1000));
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "aba");
+}
+
+#[test]
+fn paste_does_not_use_a_stale_register_when_the_clipboard_has_no_text() {
+    // Copied in ted, then an image or file was copied elsewhere.
+    for how in ["none", "empty"] {
         let (mut app, clip) = clip_app("ab");
         press(&mut app, shift(KeyCode::Right), 1);
         app.handle_key(ctrl('c'), t(1000));
-        match how {
-            "none" => clip.set_contents(None),
-            "empty" => clip.set_contents(Some("")),
-            _ => clip.set_broken(true),
-        }
+        clip.set_contents(if how == "none" { None } else { Some("") });
         app.handle_key(key(KeyCode::End), t(1000));
         app.handle_key(ctrl('v'), t(1000));
-        assert_eq!(text(&app), "aba", "{how}");
+        assert_eq!(text(&app), "ab", "{how}");
+        assert_eq!(message(&app), "Clipboard has no text", "{how}");
+        assert!(!app.editor().buffer().is_modified());
     }
+}
+
+#[test]
+fn paste_does_not_use_a_stale_register_when_reading_failed() {
+    let (mut app, clip) = clip_app("ab");
+    press(&mut app, shift(KeyCode::Right), 1);
+    app.handle_key(ctrl('c'), t(1000));
+    clip.set_forced_read(Some(ClipboardRead::Failed));
+    app.handle_key(key(KeyCode::End), t(1000));
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "ab");
+    assert_eq!(message(&app), "Clipboard read failed");
+}
+
+#[test]
+fn paste_refuses_a_clipboard_over_the_size_limit() {
+    let (mut app, clip) = clip_app("ab");
+    clip.set_forced_read(Some(ClipboardRead::TooLarge));
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "ab");
+    assert_eq!(message(&app), "Clipboard too large");
+}
+
+#[test]
+fn paste_uses_the_register_after_a_copy_the_system_never_got() {
+    for read in [None, Some(ClipboardRead::Failed)] {
+        let (mut app, clip) = clip_app("ab");
+        clip.set_contents(Some("old"));
+        clip.set_writes_fail(true);
+        press(&mut app, shift(KeyCode::Right), 1);
+        app.handle_key(ctrl('c'), t(1000));
+        // The system still holds the older text, or cannot be read at all.
+        clip.set_forced_read(read.clone());
+        app.handle_key(key(KeyCode::End), t(1000));
+        app.handle_key(ctrl('v'), t(1000));
+        if read.is_some() {
+            assert_eq!(text(&app), "aba", "failed read");
+        } else {
+            // A read that succeeds says what the clipboard holds now.
+            assert_eq!(text(&app), "abold");
+        }
+    }
+}
+
+#[test]
+fn the_register_stops_winning_once_the_system_clipboard_works_again() {
+    let (mut app, clip) = clip_app("ab");
+    clip.set_writes_fail(true);
+    press(&mut app, shift(KeyCode::Right), 1);
+    app.handle_key(ctrl('c'), t(1000));
+    clip.set_writes_fail(false);
+    // A later successful copy clears the flag: an empty clipboard is now "no text".
+    app.handle_key(ctrl('c'), t(1000));
+    clip.set_contents(None);
+    app.handle_key(key(KeyCode::End), t(1000));
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "ab");
+    assert_eq!(message(&app), "Clipboard has no text");
+
+    // A later successful read clears it too.
+    clip.set_writes_fail(true);
+    press(&mut app, shift(KeyCode::Left), 1);
+    app.handle_key(ctrl('c'), t(1000));
+    app.handle_key(key(KeyCode::End), t(1000));
+    clip.set_writes_fail(false);
+    clip.set_contents(Some("sys"));
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "absys");
+    clip.set_contents(None);
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "absys", "the register is no longer newer");
 }
 
 #[test]
@@ -183,6 +281,12 @@ fn paste_with_nothing_anywhere_says_so_and_changes_nothing() {
     app.handle_key(ctrl('v'), t(1000));
     assert_eq!(text(&app), "ab");
     assert!(!app.editor().buffer().is_modified());
+    assert_eq!(message(&app), "Clipboard has no text");
+
+    let (mut app, clip) = clip_app("ab");
+    clip.set_broken(true);
+    app.handle_key(ctrl('v'), t(1000));
+    assert_eq!(text(&app), "ab");
     assert_eq!(message(&app), "Nothing to paste");
 }
 

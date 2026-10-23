@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
 use crate::bufferlist::{BufferList, ListAction};
-use crate::clipboard::{Clipboard, SystemClipboard};
+use crate::clipboard::{Clipboard, ClipboardRead, SystemClipboard};
 use crate::command::{self, Command};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
@@ -63,6 +63,9 @@ pub struct App {
     /// What the last copy or cut took; paste falls back to it when the
     /// system clipboard has no text.
     register: String,
+    /// The last copy or cut did not reach the system clipboard, so the
+    /// register is newer than whatever the clipboard holds.
+    register_newer: bool,
 }
 
 impl App {
@@ -82,6 +85,7 @@ impl App {
         App {
             clipboard,
             register: String::new(),
+            register_newer: false,
             editors: vec![editor],
             current: 0,
             location,
@@ -356,10 +360,13 @@ impl App {
 
     /// Remembers `text` as the last copy: in the register always, in the
     /// system clipboard when that works.
-    fn store(&mut self, text: &str) {
+    /// False when the system clipboard did not get it ("ted only").
+    fn store(&mut self, text: &str) -> bool {
         self.register.clear();
         self.register.push_str(text);
-        let _ = self.clipboard.set(text);
+        let stored = self.clipboard.set(text);
+        self.register_newer = !stored;
+        stored
     }
 
     /// Ctrl-C / `copy`: the selection goes to the clipboard; text and
@@ -367,8 +374,8 @@ impl App {
     fn copy(&mut self) {
         match self.editor().selected_text() {
             Some(text) => {
-                self.store(&text);
-                let message = format!("Copied {} chars", text.chars().count());
+                let note = if self.store(&text) { "" } else { " (ted only)" };
+                let message = format!("Copied {} chars{note}", text.chars().count());
                 self.editor_mut().set_message(message);
             }
             None => self.editor_mut().set_message("Nothing selected".to_string()),
@@ -379,20 +386,32 @@ impl App {
     fn cut(&mut self) {
         match self.editor_mut().cut_selection() {
             Some(text) => {
-                self.store(&text);
-                let message = format!("Cut {} chars", text.chars().count());
+                let note = if self.store(&text) { "" } else { " (ted only)" };
+                let message = format!("Cut {} chars{note}", text.chars().count());
                 self.editor_mut().set_message(message);
             }
             None => self.editor_mut().set_message("Nothing selected".to_string()),
         }
     }
 
-    /// Ctrl-V / `paste`: the system clipboard's text, or the register when
-    /// that is empty or unavailable.
+    /// Ctrl-V / `paste`: the system clipboard's text. The register stands in
+    /// only when there is no clipboard tool at all, or when the last copy
+    /// never reached the system clipboard and the system has nothing newer to
+    /// say. An empty, non-text or unreadable clipboard pastes nothing: the
+    /// register may be stale (an image was copied elsewhere since).
     fn paste_clipboard(&mut self) {
+        let newer = self.register_newer;
         let text = match self.clipboard.get() {
-            Some(text) if !text.is_empty() => text,
-            _ => self.register.clone(),
+            ClipboardRead::Text(text) => {
+                self.register_newer = false;
+                text
+            }
+            ClipboardRead::Unavailable => self.register.clone(),
+            ClipboardRead::Empty if newer => self.register.clone(),
+            ClipboardRead::Failed if newer => self.register.clone(),
+            ClipboardRead::Empty => return self.editor_mut().set_message("Clipboard has no text".to_string()),
+            ClipboardRead::Failed => return self.editor_mut().set_message("Clipboard read failed".to_string()),
+            ClipboardRead::TooLarge => return self.editor_mut().set_message("Clipboard too large".to_string()),
         };
         if text.is_empty() {
             self.editor_mut().set_message("Nothing to paste".to_string());

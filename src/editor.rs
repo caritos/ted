@@ -595,7 +595,7 @@ impl Editor {
             KeyCode::F(3) => self.find_again(),
             KeyCode::Char('a') if ctrl => self.buffer.select_all(),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
-            KeyCode::Enter => self.buffer.insert_newline(),
+            KeyCode::Enter => self.buffer.insert_newline_indent(),
             KeyCode::Backspace => self.buffer.backspace(),
             KeyCode::Delete => self.buffer.delete(),
             KeyCode::Esc => self.buffer.clear_selection(),
@@ -934,3 +934,5 @@ mod tab_tests;
 mod tests;
 #[cfg(test)]
 mod undo_tests;
+#[cfg(test)]
+mod indent_tests;

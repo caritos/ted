@@ -464,8 +464,7 @@ impl Buffer {
         if query.is_empty() {
             return None;
         }
-        let exact = query.chars().any(char::is_uppercase);
-        let needle: Vec<char> = query.chars().map(|c| fold(c, exact)).collect();
+        let (exact, needle) = needle_of(query);
         let rows = self.line_count();
         // Both buffers are reused for every row, so a scan allocates once.
         let mut scratch = Scratch::default();
@@ -504,6 +503,87 @@ impl Buffer {
             }
         }
         None
+    }
+
+    /// (col, len in chars) of every non-overlapping match of `query` in the
+    /// text of `row`, left to right, using the same smart-case matching as
+    /// `find`. Empty for an empty query or a row out of range.
+    pub fn matches_in_line(&self, row: usize, query: &str) -> Vec<(usize, usize)> {
+        if query.is_empty() || row >= self.line_count() {
+            return Vec::new();
+        }
+        let (exact, needle) = needle_of(query);
+        let mut scratch = Scratch::default();
+        let cols = row_matches(self.rope.line(row), query, &needle, exact, &mut scratch);
+        non_overlapping(cols, needle.len()).map(|c| (c, needle.len())).collect()
+    }
+
+    /// Replaces every non-overlapping match of `query` with `with` (only the
+    /// matches fully inside `within`, (row, col) positions in document order,
+    /// when given) as ONE undo step, and returns how many there were. The
+    /// replaced text is not searched again. With no match nothing changes. The
+    /// cursor ends at the start of the first replacement; the selection is
+    /// cleared.
+    pub fn replace_all(
+        &mut self,
+        query: &str,
+        with: &str,
+        within: Option<((usize, usize), (usize, usize))>,
+    ) -> usize {
+        if query.is_empty() {
+            return 0;
+        }
+        let (exact, needle) = needle_of(query);
+        let rows = self.line_count();
+        let (first_row, last_row) = within.map_or((0, rows - 1), |(a, b)| (a.0, b.0.min(rows - 1)));
+        if first_row > last_row {
+            return 0;
+        }
+        let mut scratch = Scratch::default();
+        // One walk over the rows builds the replaced span (first match start to
+        // last match end) as it goes: `tail` holds the text since the last match.
+        let (mut span, mut tail, mut text) = (String::new(), String::new(), String::new());
+        let (mut count, mut start, mut end) = (0, 0, 0);
+        let mut line_start = self.rope.line_to_char(first_row);
+        for (i, line) in self.rope.lines_at(first_row).take(last_row - first_row + 1).enumerate() {
+            let row = first_row + i;
+            let cols = row_matches(line, query, &needle, exact, &mut scratch);
+            let mut kept = non_overlapping(cols, needle.len())
+                .filter(|&col| within.is_none_or(|(from, to)| (row, col) >= from && (row, col + needle.len()) <= to))
+                .peekable();
+            if kept.peek().is_none() {
+                if count > 0 {
+                    push_slice(&mut tail, line);
+                }
+                line_start += line.len_chars();
+                continue;
+            }
+            text.clear();
+            push_slice(&mut text, line);
+            let (mut char_at, mut byte_at) = (0, 0);
+            for col in kept {
+                let gap = byte_offset(&text, byte_at, col - char_at);
+                if count == 0 {
+                    start = line_start + col;
+                } else {
+                    tail.push_str(&text[byte_at..gap]);
+                    span.push_str(&tail);
+                }
+                tail.clear();
+                span.push_str(with);
+                byte_at = byte_offset(&text, gap, needle.len());
+                char_at = col + needle.len();
+                end = line_start + char_at;
+                count += 1;
+            }
+            tail.push_str(&text[byte_at..]);
+            line_start += line.len_chars();
+        }
+        if count == 0 {
+            return 0;
+        }
+        self.replace_range_to(start, end, &span, start);
+        count
     }
 
     /// Puts the cursor at the nearest valid position to (`row`, `col`).
@@ -633,13 +713,17 @@ impl Buffer {
     /// Replaces chars `from..to` with `text` in one rope edit and one history
     /// step (never merged, and the next edit starts a fresh run).
     fn replace_range(&mut self, from: usize, to: usize, text: &str) {
+        self.replace_range_to(from, to, text, from + text.chars().count());
+    }
+
+    /// `replace_range` leaving the cursor at char index `after` (also on redo).
+    fn replace_range_to(&mut self, from: usize, to: usize, text: &str, after: usize) {
         let before = self.cursor_index();
         let removed = self.rope.slice(from..to).to_string();
         let breaks = removed.chars().chain(text.chars()).any(is_break);
         let row_before = self.rope.char_to_line(from);
         self.rope.remove(from..to);
         self.rope.insert(from, text);
-        let after = from + text.chars().count();
         let row = row_before.min(self.rope.char_to_line(from));
         self.mark_dirty(if breaks { row.saturating_sub(1) } else { row });
         self.anchor = None;
@@ -803,6 +887,36 @@ fn row_matches<'a>(
     cols
 }
 
+/// Whether the query is matched exactly (it has an uppercase char) and its
+/// folded chars.
+fn needle_of(query: &str) -> (bool, Vec<char>) {
+    let exact = query.chars().any(char::is_uppercase);
+    (exact, query.chars().map(|c| fold(c, exact)).collect())
+}
+
+/// The start columns of `cols` that do not overlap an earlier kept match.
+fn non_overlapping(cols: &[usize], len: usize) -> impl Iterator<Item = usize> + '_ {
+    let mut next = 0;
+    cols.iter().copied().filter(move |&c| {
+        let keep = c >= next;
+        if keep {
+            next = c + len;
+        }
+        keep
+    })
+}
+
+/// Byte index in `text` that is `chars` chars after byte index `from`.
+fn byte_offset(text: &str, from: usize, chars: usize) -> usize {
+    text[from..].char_indices().nth(chars).map_or(text.len(), |(i, _)| from + i)
+}
+
+fn push_slice(out: &mut String, slice: RopeSlice) {
+    for chunk in slice.chunks() {
+        out.push_str(chunk);
+    }
+}
+
 /// Buffers a search reuses for every row.
 #[derive(Default)]
 struct Scratch {
@@ -918,3 +1032,5 @@ mod tests;
 mod undo_tests;
 #[cfg(test)]
 mod selection_tests;
+#[cfg(test)]
+mod replace_tests;

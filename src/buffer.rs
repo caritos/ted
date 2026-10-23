@@ -26,6 +26,10 @@ pub struct Buffer {
     dirty_row: Option<usize>,
     /// Char index where the selection started; the cursor is its other end.
     anchor: Option<usize>,
+    /// Bytes of text held by `undo` (see `Edit::bytes`).
+    hist_bytes: usize,
+    /// Oldest steps are dropped beyond this many bytes (the newest is kept).
+    hist_limit: usize,
 }
 
 impl Default for Buffer {
@@ -52,6 +56,8 @@ impl Buffer {
             merge_ok: false,
             dirty_row: Some(0),
             anchor: None,
+            hist_bytes: 0,
+            hist_limit: MAX_HISTORY_BYTES,
         }
     }
 
@@ -119,6 +125,12 @@ impl Buffer {
         self.clean != Some(self.undo.len())
     }
 
+    /// Bytes of text held by the undo history, summed step by step (tests).
+    #[cfg(test)]
+    fn history_bytes(&self) -> usize {
+        self.undo.iter().map(Edit::bytes).sum()
+    }
+
     /// True when there is an edit step to undo.
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
@@ -139,6 +151,7 @@ impl Buffer {
     pub fn undo(&mut self) -> bool {
         self.anchor = None;
         let Some(edit) = self.undo.pop_back() else { return false };
+        self.hist_bytes -= edit.bytes();
         self.apply(edit.index, edit.inserted_len, &edit.removed_text());
         self.place_cursor(edit.before);
         self.goal_col = self.col;
@@ -151,9 +164,10 @@ impl Buffer {
     pub fn redo(&mut self) -> bool {
         self.anchor = None;
         let Some(edit) = self.redo.pop() else { return false };
-        self.apply(edit.index, edit.removed.len(), &edit.inserted);
+        self.apply(edit.index, edit.removed_len, &edit.inserted);
         self.place_cursor(edit.after);
         self.goal_col = self.col;
+        self.hist_bytes += edit.bytes();
         self.undo.push_back(edit);
         self.merge_ok = false;
         true
@@ -162,8 +176,7 @@ impl Buffer {
     /// Replaces `remove_len` chars at `index` with `insert`, marking every row
     /// that may have changed (one above when line breaks are involved).
     fn apply(&mut self, index: usize, remove_len: usize, insert: &str) {
-        let removed: Vec<char> = self.rope.slice(index..index + remove_len).chars().collect();
-        let breaks = removed.iter().chain(insert.chars().collect::<Vec<_>>().iter()).any(|&c| is_break(c));
+        let breaks = self.rope.slice(index..index + remove_len).chars().any(is_break) || insert.chars().any(is_break);
         let before_row = self.rope.char_to_line(index);
         self.rope.remove(index..index + remove_len);
         self.rope.insert(index, insert);
@@ -182,16 +195,22 @@ impl Buffer {
             self.redo.clear();
         }
         let len = self.undo.len();
-        if self.merge_ok
-            && self.clean != Some(len)
-            && let Some(last) = self.undo.back_mut()
-            && last.merge(&edit)
-        {
-            return;
+        if let Some(last) = self.undo.back_mut() {
+            let was = last.bytes();
+            if self.merge_ok && self.clean != Some(len) && last.merge(&edit) {
+                self.hist_bytes = self.hist_bytes - was + last.bytes();
+                return;
+            }
+            // The run ends here: store its text compactly.
+            last.seal();
+            self.hist_bytes = self.hist_bytes - was + last.bytes();
         }
+        self.hist_bytes += edit.bytes();
         self.undo.push_back(edit);
-        if self.undo.len() > MAX_EDITS {
-            self.undo.pop_front();
+        while self.undo.len() > 1 && (self.undo.len() > MAX_EDITS || self.hist_bytes > self.hist_limit) {
+            if let Some(old) = self.undo.pop_front() {
+                self.hist_bytes -= old.bytes();
+            }
             self.clean = self.clean.and_then(|c| c.checked_sub(1));
         }
         self.merge_ok = true;
@@ -209,6 +228,9 @@ impl Buffer {
         self.dirty_row = Some(self.dirty_row.map_or(row, |d| d.min(row)));
     }
 
+    /// Inserts one typed char. Paste and any other multi-char input must use
+    /// `insert_str`: a line-break char given here does not re-place the cursor
+    /// the way `insert_newline` and `insert_str` do.
     pub fn insert_char(&mut self, c: char) {
         if self.replace_selection(&c.to_string()) {
             return;
@@ -534,7 +556,8 @@ impl Buffer {
 
     /// Inserts `text` at the cursor, replacing the selection if there is one,
     /// as one undo step that never merges with its neighbours. The cursor ends
-    /// after the inserted text. The caller normalises line breaks.
+    /// after the inserted text. The caller normalises line breaks. This is the
+    /// entry point for paste and all multi-char input (one rope insert).
     pub fn insert_str(&mut self, text: &str) {
         if !self.replace_selection(text) && !text.is_empty() {
             let at = self.cursor_index();
@@ -619,15 +642,22 @@ impl Buffer {
 /// Most steps kept in the undo history; the oldest are dropped.
 const MAX_EDITS: usize = 10_000;
 
+/// Most text bytes kept in the undo history; the oldest steps are dropped
+/// beyond it (the newest step is always kept).
+const MAX_HISTORY_BYTES: usize = 64 << 20;
+
 /// One undoable step: at char `index`, the removed chars were replaced by
 /// `inserted`. `before` / `after` are the cursor's char index around the step.
 /// Run-merging only looks at the new piece, so a long run stays linear.
 #[derive(Debug)]
 struct Edit {
     index: usize,
-    /// Removed chars in removal order: text order, or reversed when `rev`
-    /// (Backspace runs grow backwards, so they are pushed in O(1)).
-    removed: Vec<char>,
+    /// Removed text in document order (empty while `rev_buf` is in use).
+    removed: String,
+    removed_len: usize,
+    /// Backspace runs grow backwards: while one is in progress its chars are
+    /// kept reversed here (pushed in O(1)); `seal` turns them into `removed`.
+    rev_buf: Vec<char>,
     rev: bool,
     inserted: String,
     inserted_len: usize,
@@ -638,15 +668,14 @@ struct Edit {
 }
 
 impl Edit {
+    /// `removed` is in document order; `rev` marks a Backspace step.
     fn new(index: usize, removed: &str, inserted: &str, before: usize, after: usize, rev: bool) -> Self {
-        let mut chars: Vec<char> = removed.chars().collect();
-        if rev {
-            chars.reverse();
-        }
         Edit {
             index,
-            plain: !chars.iter().copied().chain(inserted.chars()).any(is_break),
-            removed: chars,
+            plain: !removed.chars().chain(inserted.chars()).any(is_break),
+            removed: removed.to_string(),
+            removed_len: removed.chars().count(),
+            rev_buf: Vec::new(),
             rev,
             inserted: inserted.to_string(),
             inserted_len: inserted.chars().count(),
@@ -657,11 +686,24 @@ impl Edit {
 
     /// The removed text in document order.
     fn removed_text(&self) -> String {
-        if self.rev {
-            self.removed.iter().rev().collect()
+        if self.rev_buf.is_empty() {
+            self.removed.clone()
         } else {
-            self.removed.iter().collect()
+            self.rev_buf.iter().rev().collect()
         }
+    }
+
+    /// Moves an in-progress Backspace run into the compact `removed` string.
+    fn seal(&mut self) {
+        if !self.rev_buf.is_empty() {
+            self.removed = self.rev_buf.iter().rev().collect();
+            self.rev_buf = Vec::new();
+        }
+    }
+
+    /// Bytes of heap text this step holds.
+    fn bytes(&self) -> usize {
+        self.removed.len() + self.inserted.len() + self.rev_buf.len() * std::mem::size_of::<char>()
     }
 
     /// Folds `next` (performed right after `self`) into `self` if both are
@@ -670,7 +712,7 @@ impl Edit {
         if self.after != next.before || !self.plain || !next.plain {
             return false;
         }
-        if self.removed.is_empty() && next.removed.is_empty() {
+        if self.removed_len == 0 && next.removed_len == 0 {
             if self.inserted.is_empty() || self.index + self.inserted_len != next.index {
                 return false;
             }
@@ -683,10 +725,15 @@ impl Edit {
             return false;
         }
         if self.rev {
-            if next.index + next.removed.len() != self.index {
+            if next.index + next.removed_len != self.index {
                 return false;
             }
-            self.removed.extend_from_slice(&next.removed);
+            if self.rev_buf.is_empty() {
+                self.rev_buf = self.removed.chars().rev().collect();
+                self.removed = String::new();
+            }
+            self.rev_buf.extend(next.removed.chars().rev());
+            self.removed_len += next.removed_len;
             self.index = next.index;
             self.after = next.after;
             true
@@ -694,7 +741,8 @@ impl Edit {
             if next.index != self.index {
                 return false;
             }
-            self.removed.extend_from_slice(&next.removed);
+            self.removed.push_str(&next.removed);
+            self.removed_len += next.removed_len;
             true
         }
     }

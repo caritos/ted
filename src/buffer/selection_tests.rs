@@ -790,3 +790,265 @@ fn randomized_selection_edits_match_a_reference() {
         random_run(seed);
     }
 }
+
+// --- history size and the cap ----------------------------------------------
+
+#[test]
+fn replace_steps_stay_under_the_byte_budget() {
+    let big = "0123456789abcdef\n".repeat(12_000); // about 200 KB
+    let mut b = Buffer::from_text(&big);
+    b.hist_limit = 1 << 20;
+    for i in 0..40 {
+        b.select_all();
+        b.insert_str(&format!("{i}{big}"));
+        assert_eq!(b.hist_bytes, b.history_bytes(), "step {i}");
+        let newest = b.undo.back().unwrap().bytes();
+        assert!(b.history_bytes() <= b.hist_limit + newest, "step {i}: {}", b.history_bytes());
+    }
+    assert!(b.undo.len() < 40, "{} steps kept", b.undo.len());
+    assert!(b.undo.len() >= 2);
+    let mut undone = 0;
+    while b.undo() {
+        undone += 1;
+        assert_eq!(b.hist_bytes, b.history_bytes());
+    }
+    assert_eq!(undone, b.redo.len());
+    assert_eq!(b.hist_bytes, 0);
+    while b.redo() {}
+    assert_eq!(b.hist_bytes, b.history_bytes());
+    assert!(b.text().ends_with(&big));
+}
+
+#[test]
+fn a_single_step_over_the_budget_is_still_kept() {
+    let mut b = Buffer::from_text("abc");
+    b.hist_limit = 4;
+    b.select_all();
+    b.insert_str("a long replacement text");
+    assert_eq!(b.undo.len(), 1);
+    assert!(b.undo());
+    assert_eq!(b.text(), "abc");
+}
+
+#[test]
+fn dropping_the_clean_step_by_budget_makes_it_unreachable() {
+    let big = "x".repeat(100_000);
+    let mut b = Buffer::from_text("abc");
+    b.hist_limit = 450_000;
+    b.insert_char('!'); // step 1, then saved
+    b.mark_clean();
+    assert!(!b.is_modified());
+    for _ in 0..6 {
+        b.select_all();
+        b.insert_str(&big);
+    }
+    assert!(b.undo.len() < 7, "oldest steps were dropped");
+    while b.undo() {}
+    assert!(b.is_modified(), "the saved state is gone");
+    while b.redo() {}
+    assert!(b.is_modified());
+}
+
+#[test]
+fn dropping_older_steps_by_budget_shifts_the_clean_position() {
+    let big = "x".repeat(100_000);
+    let mut b = Buffer::from_text("abc");
+    b.hist_limit = 450_000;
+    for _ in 0..3 {
+        b.select_all();
+        b.insert_str(&big);
+    }
+    b.mark_clean();
+    for _ in 0..6 {
+        b.select_all();
+        b.insert_str(&big);
+        b.mark_clean();
+    }
+    assert!(!b.is_modified());
+    assert!(b.undo());
+    assert!(b.is_modified());
+    assert!(b.redo());
+    assert!(!b.is_modified());
+    b.select_all();
+    b.insert_str("zz");
+    assert!(b.is_modified());
+    assert!(b.undo());
+    assert!(!b.is_modified());
+}
+
+#[test]
+fn a_backspace_run_is_sealed_compactly_and_still_undoes() {
+    let mut b = Buffer::from_text(&"ab".repeat(500));
+    b.move_end();
+    for _ in 0..300 {
+        b.backspace();
+    }
+    assert!(!b.undo.back().unwrap().rev_buf.is_empty());
+    b.move_left();
+    b.insert_char('x'); // ends the run
+    assert!(b.undo.iter().all(|e| e.rev_buf.is_empty()));
+    assert_eq!(b.hist_bytes, b.history_bytes());
+    b.undo();
+    b.undo();
+    assert_eq!(b.text(), "ab".repeat(500));
+}
+
+#[test]
+fn save_replace_undo_is_unmodified_and_redo_is_modified() {
+    let path = temp_file("srm");
+    let mut b = Buffer::open(&path).unwrap();
+    b.insert_str("hello");
+    b.save().unwrap();
+    assert!(!b.is_modified());
+    b.select_all();
+    b.insert_char('x');
+    assert!(b.is_modified());
+    assert!(b.undo());
+    assert!(!b.is_modified());
+    assert_eq!(b.text(), "hello");
+    assert!(b.redo());
+    assert!(b.is_modified());
+    assert_eq!(b.text(), "x");
+    let _ = fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn the_step_cap_with_replace_steps_drops_the_oldest() {
+    let mut b = Buffer::from_text("abc");
+    for i in 0..10_001 {
+        b.select_all();
+        b.insert_char(if i % 2 == 0 { 'a' } else { 'b' });
+    }
+    assert_eq!(b.text(), "a");
+    let mut undone = 0;
+    while b.undo() {
+        undone += 1;
+    }
+    assert_eq!(undone, 10_000);
+    assert_eq!(b.text(), "a", "the first replacement is the oldest kept state");
+    assert!(b.is_modified(), "the clean state was dropped");
+    let mut redone = 0;
+    while b.redo() {
+        redone += 1;
+    }
+    assert_eq!(redone, 10_000);
+    assert_eq!(b.text(), "a");
+    assert_eq!(b.hist_bytes, b.history_bytes());
+}
+
+// --- randomized, with merging, saves and cursor checks ---------------------
+
+fn random_run_merging(seed: u64) {
+    let starts = ["", "abc", "a\rb\r\nc\n", "x\r\ny\rz", "h\u{e9}llo\nw\u{f6}rld\n"];
+    let pieces = ["a", "\n", "\r", "\r\n", "\u{e9}", "xy\nz", "q"];
+    let mut rng = Rng(seed);
+    let initial = starts[rng.below(starts.len())];
+    let mut b = Buffer::from_text(initial);
+    let path = temp_file("rm");
+    b.path = Some(path.clone());
+    b.take_dirty_row();
+    let mut prev = rows(&b);
+    // By history position: the text there; by step: cursor before and after it.
+    let mut texts = vec![initial.to_string()];
+    let mut befores: Vec<(usize, usize)> = Vec::new();
+    let mut afters: Vec<(usize, usize)> = Vec::new();
+    let mut clean = Some(0usize);
+    for step in 0..200 {
+        let op = rng.below(18);
+        let ctx = format!("seed {seed} step {step} op {op}");
+        let old_n = b.undo.len();
+        let before_text = b.text();
+        let before_cur = b.cursor();
+        match op {
+            0..=2 => match rng.below(6) {
+                0 => b.move_left_select(true),
+                1 => b.move_right_select(true),
+                2 => b.move_up_select(true),
+                3 => b.move_down_select(true),
+                4 => b.move_end_select(true),
+                _ => b.move_down_by_select(2, true),
+            },
+            3 => b.select_all(),
+            4 => match rng.below(3) {
+                0 => b.move_left(),
+                1 => b.move_right(),
+                _ => b.move_down(),
+            },
+            5 => b.insert_str(pieces[rng.below(pieces.len())]),
+            6 => {
+                b.delete_selection();
+            }
+            7 | 8 => b.insert_char(if rng.below(2) == 0 { 'a' } else { 'b' }),
+            9 => b.insert_newline(),
+            10 | 11 => b.backspace(),
+            12 => b.delete(),
+            13 | 14 => {
+                if b.undo() {
+                    let n = b.undo.len();
+                    assert_eq!(n + 1, old_n, "{ctx}");
+                    assert_eq!(b.text(), texts[n], "{ctx}");
+                    assert_eq!(b.cursor(), befores[n], "{ctx}");
+                } else {
+                    assert_eq!(old_n, 0, "{ctx}");
+                }
+                assert_eq!(b.selection(), None, "{ctx}");
+            }
+            15 => {
+                if b.redo() {
+                    let n = b.undo.len();
+                    assert_eq!(n, old_n + 1, "{ctx}");
+                    assert_eq!(b.text(), texts[n], "{ctx}");
+                    assert_eq!(b.cursor(), afters[n - 1], "{ctx}");
+                }
+                assert_eq!(b.selection(), None, "{ctx}");
+            }
+            _ => {
+                b.save().unwrap();
+                clean = Some(old_n);
+            }
+        }
+        assert_cursor_valid(&b);
+        dirty_ok(&mut b, &mut prev, &ctx);
+        let n = b.undo.len();
+        if (5..=12).contains(&op) && !(n == old_n && b.text() == before_text) {
+            assert!(n == old_n || n == old_n + 1, "{ctx}");
+            if clean.is_some_and(|c| c > old_n) {
+                clean = None;
+            }
+            texts.truncate(old_n + 1);
+            befores.truncate(old_n);
+            afters.truncate(old_n);
+            if n == old_n + 1 {
+                texts.push(b.text());
+                befores.push(before_cur);
+                afters.push(b.cursor());
+            } else {
+                // Merged into the last step: only its end state changes.
+                texts[old_n] = b.text();
+                afters[old_n - 1] = b.cursor();
+            }
+        }
+        assert_eq!(b.is_modified(), clean != Some(n), "{ctx}");
+        assert_eq!(b.hist_bytes, b.history_bytes(), "{ctx}");
+    }
+    while b.redo() {}
+    let last = b.text();
+    assert_eq!(last, *texts.last().unwrap(), "seed {seed}");
+    while b.undo() {
+        let n = b.undo.len();
+        assert_eq!(b.text(), texts[n], "seed {seed}");
+        assert_eq!(b.cursor(), befores[n], "seed {seed}");
+    }
+    assert_eq!(b.text(), initial, "seed {seed}");
+    assert_eq!(b.is_modified(), clean != Some(0), "seed {seed}");
+    while b.redo() {}
+    assert_eq!(b.text(), last, "seed {seed}");
+    let _ = fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn randomized_edits_with_merging_saves_and_cursors() {
+    for seed in 0..300 {
+        random_run_merging(seed);
+    }
+}

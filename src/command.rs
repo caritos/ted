@@ -2,9 +2,9 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 18] = [
-    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "copy",
-    "cut", "paste", "selectall", "quit",
+pub const NAMES: [&str; 19] = [
+    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "replace",
+    "copy", "cut", "paste", "selectall", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +22,7 @@ pub enum Command {
     Help,
     Undo,
     Redo,
+    Replace,
     Copy,
     Cut,
     Paste,
@@ -101,6 +102,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "help" => plain(Command::Help),
         "undo" => plain(Command::Undo),
         "redo" => plain(Command::Redo),
+        "replace" => plain(Command::Replace),
         "copy" => plain(Command::Copy),
         "cut" => plain(Command::Cut),
         "paste" => plain(Command::Paste),
@@ -268,13 +270,26 @@ mod tests {
         assert_eq!(parse("undo"), Ok(Command::Undo));
         assert_eq!(parse("redo"), Ok(Command::Redo));
         assert_eq!(parse("u"), Ok(Command::Undo));
-        assert_eq!(parse("re"), Ok(Command::Redo));
-        assert_eq!(parse("r"), Ok(Command::Redo));
+        // `re` and `r` used to run redo; `replace` made them ambiguous.
+        assert_eq!(err("re"), "Ambiguous: redo, replace");
+        assert_eq!(err("r"), "Ambiguous: redo, replace");
+        assert_eq!(parse("red"), Ok(Command::Redo));
         assert_eq!(err("undo 2"), "Usage: undo");
         assert_eq!(err("redo now"), "Usage: redo");
         assert_eq!(matches("u"), vec!["undo"]);
         assert_eq!(complete("un"), "undo");
-        assert_eq!(complete("r"), "redo");
+        assert_eq!(complete("r"), "re");
+        assert_eq!(complete("red"), "redo");
+    }
+
+    #[test]
+    fn replace_parses_without_arguments() {
+        assert_eq!(parse("replace"), Ok(Command::Replace));
+        assert_eq!(parse("REPLACE"), Ok(Command::Replace));
+        assert_eq!(parse("rep"), Ok(Command::Replace));
+        assert_eq!(err("replace x"), "Usage: replace");
+        assert_eq!(matches("re"), vec!["redo", "replace"]);
+        assert_eq!(complete("rep"), "replace");
     }
 
     #[test]

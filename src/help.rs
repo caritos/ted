@@ -27,7 +27,8 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Backspace / Delete", "Delete before / under the cursor"),
             ("Ctrl-S", "Save the current buffer"),
             ("Ctrl-Z / Ctrl-Y", "Undo / redo"),
-            ("Ctrl-F", "Find text"),
+            ("Ctrl-F", "Find text (matches are underlined)"),
+            ("Ctrl-R", "Replace all (in the selection, if any)"),
             ("Ctrl-X", "Command prompt (Tab completes)"),
             ("F3", "Find the next match"),
             ("Ctrl-L", "Go to a line number"),
@@ -54,6 +55,13 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Esc", "Cancel; the cursor goes back"),
             ("Down / Ctrl-F", "Next match"),
             ("Up", "Previous match"),
+        ],
+    ),
+    (
+        "Replace prompt",
+        &[
+            ("Enter", "Replace: term, then With: text; Enter again replaces"),
+            ("Esc", "Cancel; nothing changes"),
         ],
     ),
     (
@@ -202,7 +210,7 @@ mod tests {
     fn table_lists_every_documented_key() {
         let keys: Vec<&str> = HELP.iter().flat_map(|(_, rows)| rows.iter().flat_map(|(k, _)| k.split(" / "))).collect();
         for name in [
-            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-L", "Ctrl-X", "Ctrl-Z", "Ctrl-Y", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
+            "Ctrl-S", "Ctrl-Q", "Ctrl-F", "Ctrl-R", "Ctrl-L", "Ctrl-X", "Ctrl-Z", "Ctrl-Y", "F3", "Ctrl-G", "Ctrl-T", "Ctrl-O", "Ctrl-N", "Ctrl-P", "Ctrl-W", "Home", "End", "PageUp", "PageDown", "Tab",
             "Backspace", "Delete", "Enter", "F1", "F2", "Up", "Down", "Left", "Right", "Esc", "r", "b", "q",
             "Ctrl-A", "Ctrl-C", "Ctrl-K", "Ctrl-V", "Shift + move keys",
         ] {

@@ -42,6 +42,8 @@ enum PromptKind {
     Find,
     Goto,
     Command,
+    /// Two steps: the term (`Replace:`), then the new text (`With:`).
+    Replace,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,6 +65,10 @@ struct Prompt {
     /// Current match, the start for next/previous.
     current: Option<(usize, usize)>,
     status: FindStatus,
+    /// Replace only: the term, once Enter moved the prompt to the `With:` step.
+    replace_term: Option<String>,
+    /// Replace only: the selection when the prompt opened; the scope.
+    within: Option<((usize, usize), (usize, usize))>,
 }
 
 pub struct Editor {
@@ -222,12 +228,23 @@ impl Editor {
             anchor: self.buffer.selection_anchor(),
             current: None,
             status: FindStatus::Normal,
+            replace_term: None,
+            within: if kind == PromptKind::Replace { self.buffer.selection() } else { None },
         };
         if kind == PromptKind::Find && !self.last_search.is_empty() {
             prompt.text = self.last_search.clone();
             self.search_from_origin(&mut prompt);
         }
+        if kind == PromptKind::Replace {
+            // Prefilled like Find, but nothing is searched or moved.
+            prompt.text = self.last_search.clone();
+        }
         self.prompt = Some(prompt);
+    }
+
+    /// Opens the Replace prompt (Ctrl-R, the `replace` command).
+    pub fn open_replace(&mut self) {
+        self.open_prompt(PromptKind::Replace);
     }
 
     /// Incremental search: always from where the prompt opened.
@@ -300,6 +317,27 @@ impl Editor {
                             self.command = Some(prompt.text);
                         }
                     }
+                    PromptKind::Replace => match prompt.replace_term.take() {
+                        None if prompt.text.is_empty() => self.cancel(&prompt),
+                        None => {
+                            // Step two: the new text, empty allowed.
+                            prompt.replace_term = Some(std::mem::take(&mut prompt.text));
+                            self.prompt = Some(prompt);
+                        }
+                        Some(term) => {
+                            let n = self.buffer.replace_all(&term, &prompt.text, prompt.within);
+                            if n == 0 {
+                                self.cancel(&prompt);
+                                let scope = if prompt.within.is_some() { " in selection" } else { "" };
+                                self.message = format!("Not found{scope}: {term}");
+                            } else {
+                                let s = if n == 1 { "" } else { "s" };
+                                self.message = format!("Replaced {n} occurrence{s}");
+                            }
+                            self.accepted_search = Some(term.clone());
+                            self.last_search = term;
+                        }
+                    },
                 }
                 return;
             }
@@ -323,7 +361,7 @@ impl Editor {
                         prompt.text.push(c);
                     }
                 }
-                PromptKind::Command => prompt.text.push(c),
+                PromptKind::Command | PromptKind::Replace => prompt.text.push(c),
             },
             KeyCode::Tab if prompt.kind == PromptKind::Command => {
                 let word = prompt.text.trim_start();
@@ -375,8 +413,8 @@ impl Editor {
 
     /// The prompt row and how many of its chars (the label, the text and the
     /// cursor mark) must stay visible; the rest is a hint that may be cut.
-    fn prompt_line(&self, prompt: &Prompt) -> (String, usize) {
-        let line = self.prompt_text(prompt);
+    fn prompt_line(&self, prompt: &Prompt, width: usize) -> (String, usize) {
+        let line = self.prompt_text(prompt, width);
         let must = match prompt.kind {
             PromptKind::Command => format!("Command: {}_", prompt.text).chars().count(),
             _ => line.chars().count(),
@@ -384,7 +422,7 @@ impl Editor {
         (line, must)
     }
 
-    fn prompt_text(&self, prompt: &Prompt) -> String {
+    fn prompt_text(&self, prompt: &Prompt, width: usize) -> String {
         match prompt.kind {
             PromptKind::Goto => format!("Go to line: {}_", prompt.text),
             PromptKind::Command => {
@@ -399,6 +437,18 @@ impl Editor {
                 }
                 line
             }
+            PromptKind::Replace => match &prompt.replace_term {
+                None => format!("Replace: {}_", prompt.text),
+                Some(term) => {
+                    // The term is a reminder: shown only when the row holds it.
+                    let long = format!("With ({term}): {}_", prompt.text);
+                    if long.chars().count() <= width {
+                        long
+                    } else {
+                        format!("With: {}_", prompt.text)
+                    }
+                }
+            },
             PromptKind::Find => match prompt.status {
                 FindStatus::Normal => format!("Find: {}_", prompt.text),
                 FindStatus::Wrapped => format!("Find: {} (wrapped)", prompt.text),
@@ -420,6 +470,7 @@ impl Editor {
         match key.code {
             KeyCode::Char('s') if ctrl => self.save(),
             KeyCode::Char('f') if ctrl => self.open_prompt(PromptKind::Find),
+            KeyCode::Char('r') if ctrl => self.open_replace(),
             KeyCode::Char('l') if ctrl => self.open_prompt(PromptKind::Goto),
             KeyCode::Char('x') if ctrl => self.open_prompt(PromptKind::Command),
             KeyCode::Char('z') if ctrl => self.undo(),
@@ -496,6 +547,7 @@ impl Editor {
             }
         }
         let mut styles = self.styles(&text, &layouts);
+        self.mark_matches(&mut styles, &layouts);
         self.mark_selection(&mut styles, &layouts);
         let mut lines = text;
         if gutter > 0 {
@@ -521,7 +573,7 @@ impl Editor {
                     // The label, text and cursor mark too long for the row:
                     // show the end (where the typing happens), led by an
                     // ellipsis. Only a cut hint list keeps the head.
-                    let (line, must) = self.prompt_line(prompt);
+                    let (line, must) = self.prompt_line(prompt, width);
                     let chars = line.chars().count();
                     if must > width && width > 0 {
                         format!("…{}", clip(&line, chars - (width - 1), width - 1))
@@ -537,6 +589,32 @@ impl Editor {
                 row.saturating_sub(self.scroll_row),
                 gutter + col.saturating_sub(self.scroll_col),
             ),
+        }
+    }
+
+    /// While a Find prompt has a term: every match in the visible rows gets
+    /// `Style::Match`, replacing the syntax colour on those cells. Only the
+    /// visible rows are scanned. Drawn before the selection, which wins.
+    fn mark_matches(&self, styles: &mut [Vec<Style>], layouts: &[Vec<usize>]) {
+        let Some(prompt) = self.prompt.as_ref().filter(|p| p.kind == PromptKind::Find && !p.text.is_empty()) else {
+            return;
+        };
+        for (i, (row_styles, cells)) in styles.iter_mut().zip(layouts).enumerate() {
+            let r = self.scroll_row + i;
+            if r >= self.buffer.line_count() || cells.is_empty() {
+                continue;
+            }
+            let found = self.buffer.matches_in_line(r, &prompt.text);
+            // Matches and cells both run left to right: one walk over each.
+            let mut m = 0;
+            for (style, &c) in row_styles.iter_mut().zip(cells) {
+                while m < found.len() && found[m].0 + found[m].1 <= c {
+                    m += 1;
+                }
+                if m < found.len() && c >= found[m].0 {
+                    *style = Style::Match;
+                }
+            }
         }
     }
 
@@ -726,6 +804,8 @@ mod command_tests;
 mod gutter_tests;
 #[cfg(test)]
 mod prompt_tests;
+#[cfg(test)]
+mod replace_tests;
 #[cfg(test)]
 mod selection_tests;
 #[cfg(test)]

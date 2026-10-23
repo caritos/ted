@@ -42,6 +42,7 @@ mod clipboard;
 mod command;
 mod gutter;
 mod help;
+mod replace;
 mod saveas;
 mod search;
 mod selection;

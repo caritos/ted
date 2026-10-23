@@ -4,6 +4,9 @@
 pub enum Style {
     Normal,
     Selected,
+    /// A search match while the Find prompt is open (underlined). It replaces
+    /// the syntax colour on those cells; there is no combined style.
+    Match,
     Added,
     Removed,
     Hunk,

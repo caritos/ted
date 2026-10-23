@@ -321,7 +321,7 @@ try:
     check("txt: no syntax colors", b"\x1b[38;5;" not in out, out[:300])
     # The line number gutter is dim by design; nothing else on a .txt file may be.
     no_gutter = re.sub(rb"\x1b\[2m[ 0-9]*\x1b\[0m", b"", out)
-    check("txt: gutter is dim", b"\x1b[2m  1 " in out, out[:300])
+    check("txt: gutter is dim, the cursor row's number bold", b"\x1b[1m  1 " in out and b"\x1b[2m  2 " in out, out[:300])
     check("txt: nothing but the gutter is dim", b"\x1b[2m" not in no_gutter, out[:300])
     check("txt session exits 0", ok)
 finally:
@@ -575,7 +575,7 @@ try:
     raw = drain(fd)
     out = plain(raw)
     check("lines: gutter shown on start", b"  1 line 0" in out and b" 12 line 11" in out, out[-300:])
-    check("lines: gutter is dim", b"\x1b[2m  1 " in raw, raw[-300:])
+    check("lines: gutter is dim, the cursor row's number bold", b"\x1b[1m  1 " in raw and b"\x1b[2m  2 " in raw, raw[-300:])
     send(fd, F2)
     out = plain(drain(fd))
     check("lines: F2 hides the gutter (text kept)", b"line 0" in out and b"  1 line 0" not in out and b" 12 line 11" not in out, out[-300:])

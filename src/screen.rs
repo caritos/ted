@@ -19,6 +19,8 @@ pub enum Style {
     Number,
     Meta,
     LineNo,
+    /// The gutter number of the cursor's row: bold instead of dim.
+    CurrentLineNo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -30,6 +30,48 @@ fn gutter_is_three_digits_and_a_space_for_small_buffers() {
 }
 
 #[test]
+fn the_cursor_rows_number_is_drawn_current_and_follows_the_cursor() {
+    let mut e = numbered(5);
+    let v = e.view(40, 8);
+    assert_eq!(&v.styles[0][..4], &[Style::CurrentLineNo; 4]);
+    assert_eq!(&v.styles[1][..4], &[Style::LineNo; 4]);
+    assert_eq!(v.styles[0][4], Style::Normal, "only the number, not the text");
+    e.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    e.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    let v = e.view(40, 8);
+    assert_eq!(&v.styles[0][..4], &[Style::LineNo; 4]);
+    assert_eq!(&v.styles[2][..4], &[Style::CurrentLineNo; 4]);
+    // Rows past the end have a blank gutter, never the current style.
+    assert!(v.styles[5][..4].iter().all(|s| *s == Style::LineNo));
+}
+
+#[test]
+fn no_current_number_without_a_gutter() {
+    let mut e = Editor::new(Buffer::from_text("abc"));
+    let v = e.view(40, 5);
+    assert!(v.styles.iter().flatten().all(|s| *s != Style::CurrentLineNo));
+    let mut e = numbered(3);
+    let v = e.view(8, 5);
+    assert!(v.styles.iter().flatten().all(|s| *s != Style::CurrentLineNo), "gutter hidden when narrow");
+}
+
+#[test]
+fn the_current_number_survives_a_selection_and_a_tiny_window() {
+    let mut e = numbered(3);
+    e.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
+    let v = e.view(40, 6);
+    // The cursor row is row 1 (the selection started on row 0).
+    assert_eq!(&v.styles[1][..4], &[Style::CurrentLineNo; 4]);
+    assert_eq!(&v.styles[0][..4], &[Style::LineNo; 4]);
+    for w in 0..=14 {
+        for h in 0..=6 {
+            let v = e.view(w, h);
+            assert_eq!(v.lines.len(), v.styles.len());
+        }
+    }
+}
+
+#[test]
 fn gutter_grows_at_a_thousand_lines() {
     let mut e = numbered(1000);
     let v = e.view(40, 5);
@@ -61,7 +103,7 @@ fn gutter_chars_are_lineno_and_text_styles_stay_aligned() {
     let v = e.view(40, 5);
     assert_eq!(v.lines[0], "  1 fn a() {}");
     assert_eq!(v.styles[0].len(), v.lines[0].chars().count());
-    assert!(v.styles[0][..4].iter().all(|s| *s == Style::LineNo));
+    assert!(v.styles[0][..4].iter().all(|s| *s == Style::CurrentLineNo));
     assert_eq!(v.styles[0][4], Style::Keyword);
     assert_eq!(v.styles[0][5], Style::Keyword);
     assert_eq!(v.styles[0][6], Style::Normal);

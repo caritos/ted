@@ -24,6 +24,8 @@ pub struct Buffer {
     merge_ok: bool,
     /// Lowest row whose text changed since the last `take_dirty_row`.
     dirty_row: Option<usize>,
+    /// Char index where the selection started; the cursor is its other end.
+    anchor: Option<usize>,
 }
 
 impl Default for Buffer {
@@ -49,6 +51,7 @@ impl Buffer {
             clean: Some(0),
             merge_ok: false,
             dirty_row: Some(0),
+            anchor: None,
         }
     }
 
@@ -129,10 +132,12 @@ impl Buffer {
     fn mark_clean(&mut self) {
         self.clean = Some(self.undo.len());
         self.merge_ok = false;
+        self.anchor = None;
     }
 
     /// Undoes the last edit step. False when there is nothing to undo.
     pub fn undo(&mut self) -> bool {
+        self.anchor = None;
         let Some(edit) = self.undo.pop_back() else { return false };
         self.apply(edit.index, edit.inserted_len, &edit.removed_text());
         self.place_cursor(edit.before);
@@ -144,6 +149,7 @@ impl Buffer {
 
     /// Redoes the last undone step. False when there is nothing to redo.
     pub fn redo(&mut self) -> bool {
+        self.anchor = None;
         let Some(edit) = self.redo.pop() else { return false };
         self.apply(edit.index, edit.removed.len(), &edit.inserted);
         self.place_cursor(edit.after);
@@ -204,6 +210,9 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        if self.replace_selection(&c.to_string()) {
+            return;
+        }
         self.mark_dirty(self.row);
         let index = self.cursor_index();
         self.rope.insert_char(index, c);
@@ -213,6 +222,9 @@ impl Buffer {
     }
 
     pub fn insert_newline(&mut self) {
+        if self.replace_selection("\n") {
+            return;
+        }
         // Splitting a line: be conservative and include the row above.
         self.mark_dirty(self.row.saturating_sub(1));
         let index = self.cursor_index();
@@ -225,6 +237,9 @@ impl Buffer {
     }
 
     pub fn backspace(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let index = self.cursor_index();
         if index == 0 {
             return;
@@ -246,6 +261,9 @@ impl Buffer {
     }
 
     pub fn delete(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let index = self.cursor_index();
         if index >= self.rope.len_chars() {
             return;
@@ -265,6 +283,76 @@ impl Buffer {
     }
 
     pub fn move_left(&mut self) {
+        self.move_left_select(false);
+    }
+
+    /// Like `move_left`; with `select` the selection is extended instead of cleared.
+    pub fn move_left_select(&mut self, select: bool) {
+        self.shift(select, Self::step_left);
+    }
+
+    pub fn move_right(&mut self) {
+        self.move_right_select(false);
+    }
+
+    /// Like `move_right`; with `select` the selection is extended instead of cleared.
+    pub fn move_right_select(&mut self, select: bool) {
+        self.shift(select, Self::step_right);
+    }
+
+    pub fn move_up(&mut self) {
+        self.move_up_select(false);
+    }
+
+    /// Like `move_up`; with `select` the selection is extended instead of cleared.
+    pub fn move_up_select(&mut self, select: bool) {
+        self.shift(select, Self::step_up);
+    }
+
+    pub fn move_down(&mut self) {
+        self.move_down_select(false);
+    }
+
+    /// Like `move_down`; with `select` the selection is extended instead of cleared.
+    pub fn move_down_select(&mut self, select: bool) {
+        self.shift(select, Self::step_down);
+    }
+
+    pub fn move_home(&mut self) {
+        self.move_home_select(false);
+    }
+
+    /// Like `move_home`; with `select` the selection is extended instead of cleared.
+    pub fn move_home_select(&mut self, select: bool) {
+        self.shift(select, Self::step_home);
+    }
+
+    pub fn move_end(&mut self) {
+        self.move_end_select(false);
+    }
+
+    /// Like `move_end`; with `select` the selection is extended instead of cleared.
+    pub fn move_end_select(&mut self, select: bool) {
+        self.shift(select, Self::step_end);
+    }
+
+    pub fn move_up_by(&mut self, rows: usize) {
+        self.move_up_by_select(rows, false);
+    }
+
+    pub fn move_up_by_select(&mut self, rows: usize, select: bool) {
+        self.shift(select, |b| b.step_up_by(rows));
+    }
+
+    pub fn move_down_by(&mut self, rows: usize) {
+        self.move_down_by_select(rows, false);
+    }
+
+    pub fn move_down_by_select(&mut self, rows: usize, select: bool) {
+        self.shift(select, |b| b.step_down_by(rows));
+    }
+
+    fn step_left(&mut self) {
         self.merge_ok = false;
         if self.col > 0 {
             self.col -= 1;
@@ -275,7 +363,7 @@ impl Buffer {
         self.goal_col = self.col;
     }
 
-    pub fn move_right(&mut self) {
+    fn step_right(&mut self) {
         self.merge_ok = false;
         if self.col < self.line_len(self.row) {
             self.col += 1;
@@ -286,7 +374,7 @@ impl Buffer {
         self.goal_col = self.col;
     }
 
-    pub fn move_up(&mut self) {
+    fn step_up(&mut self) {
         self.merge_ok = false;
         if self.row > 0 {
             self.row -= 1;
@@ -294,12 +382,38 @@ impl Buffer {
         }
     }
 
-    pub fn move_down(&mut self) {
+    fn step_down(&mut self) {
         self.merge_ok = false;
         if self.row + 1 < self.line_count() {
             self.row += 1;
             self.col = self.goal_col.min(self.line_len(self.row));
         }
+    }
+
+    fn step_home(&mut self) {
+        self.merge_ok = false;
+        self.col = 0;
+        self.goal_col = 0;
+    }
+
+    fn step_end(&mut self) {
+        self.merge_ok = false;
+        self.col = self.line_len(self.row);
+        self.goal_col = self.col;
+    }
+
+    /// Moves up `rows` lines (stopping at the first), keeping the goal column.
+    fn step_up_by(&mut self, rows: usize) {
+        self.merge_ok = false;
+        self.row = self.row.saturating_sub(rows);
+        self.col = self.goal_col.min(self.line_len(self.row));
+    }
+
+    /// Moves down `rows` lines (stopping at the last), keeping the goal column.
+    fn step_down_by(&mut self, rows: usize) {
+        self.merge_ok = false;
+        self.row = (self.row + rows).min(self.line_count() - 1);
+        self.col = self.goal_col.min(self.line_len(self.row));
     }
 
     /// Puts the cursor at char `index`, whatever the edit did to the line
@@ -308,32 +422,6 @@ impl Buffer {
         let index = index.min(self.rope.len_chars());
         self.row = self.rope.char_to_line(index);
         self.col = (index - self.rope.line_to_char(self.row)).min(self.line_len(self.row));
-    }
-
-    pub fn move_home(&mut self) {
-        self.merge_ok = false;
-        self.col = 0;
-        self.goal_col = 0;
-    }
-
-    pub fn move_end(&mut self) {
-        self.merge_ok = false;
-        self.col = self.line_len(self.row);
-        self.goal_col = self.col;
-    }
-
-    /// Moves up `rows` lines (stopping at the first), keeping the goal column.
-    pub fn move_up_by(&mut self, rows: usize) {
-        self.merge_ok = false;
-        self.row = self.row.saturating_sub(rows);
-        self.col = self.goal_col.min(self.line_len(self.row));
-    }
-
-    /// Moves down `rows` lines (stopping at the last), keeping the goal column.
-    pub fn move_down_by(&mut self, rows: usize) {
-        self.merge_ok = false;
-        self.row = (self.row + rows).min(self.line_count() - 1);
-        self.col = self.goal_col.min(self.line_len(self.row));
     }
 
     /// Finds `query` within single lines. Smart case: case-insensitive unless
@@ -400,6 +488,7 @@ impl Buffer {
     /// Not an edit: leaves the modified flag and dirty row alone.
     pub fn set_cursor(&mut self, row: usize, col: usize) {
         self.merge_ok = false;
+        self.anchor = None;
         self.row = row.min(self.line_count() - 1);
         self.col = col.min(self.line_len(self.row));
         self.goal_col = self.col;
@@ -409,6 +498,112 @@ impl Buffer {
     /// as line 1).
     pub fn go_to_line(&mut self, line_1_based: usize) {
         self.set_cursor(line_1_based.saturating_sub(1), 0);
+    }
+
+    /// The selection as (start, end) in document order, or `None` when empty.
+    pub fn selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        let (from, to) = self.selection_range()?;
+        Some((self.position_of(from), self.position_of(to)))
+    }
+
+    /// The selected text, or `None` when nothing is selected.
+    pub fn selected_text(&self) -> Option<String> {
+        let (from, to) = self.selection_range()?;
+        Some(self.rope.slice(from..to).to_string())
+    }
+
+    /// Selects the whole text, leaving the cursor at the end.
+    pub fn select_all(&mut self) {
+        self.merge_ok = false;
+        let end = self.rope.len_chars();
+        self.anchor = if end == 0 { None } else { Some(0) };
+        self.place_cursor(end);
+        self.goal_col = self.col;
+    }
+
+    /// Drops the selection; the cursor stays where it is.
+    pub fn clear_selection(&mut self) {
+        self.anchor = None;
+    }
+
+    /// Deletes the selection as one undo step, leaving the cursor at its
+    /// start. False (and no change) when nothing is selected.
+    pub fn delete_selection(&mut self) -> bool {
+        self.replace_selection("")
+    }
+
+    /// Inserts `text` at the cursor, replacing the selection if there is one,
+    /// as one undo step that never merges with its neighbours. The cursor ends
+    /// after the inserted text. The caller normalises line breaks.
+    pub fn insert_str(&mut self, text: &str) {
+        if !self.replace_selection(text) && !text.is_empty() {
+            let at = self.cursor_index();
+            self.replace_range(at, at, text);
+        }
+    }
+
+    /// Runs `f` (a cursor move) keeping or starting a selection.
+    fn extend_selection(&mut self, f: impl FnOnce(&mut Buffer)) {
+        let start = self.anchor.unwrap_or_else(|| self.cursor_index());
+        f(self);
+        self.anchor = (start != self.cursor_index()).then_some(start);
+    }
+
+    /// A move that extends the selection when `select`, else clears it.
+    fn shift(&mut self, select: bool, f: impl FnOnce(&mut Buffer)) {
+        if select {
+            self.extend_selection(f);
+        } else {
+            self.anchor = None;
+            f(self);
+        }
+    }
+
+    /// The non-empty selection as ordered char indexes.
+    fn selection_range(&self) -> Option<(usize, usize)> {
+        let len = self.rope.len_chars();
+        let anchor = self.anchor?.min(len);
+        let cursor = self.cursor_index();
+        match anchor.cmp(&cursor) {
+            std::cmp::Ordering::Less => Some((anchor, cursor)),
+            std::cmp::Ordering::Greater => Some((cursor, anchor)),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    fn position_of(&self, index: usize) -> (usize, usize) {
+        let row = self.rope.char_to_line(index);
+        (row, index - self.rope.line_to_char(row))
+    }
+
+    /// Replaces the selection with `text` as one step; false if none.
+    fn replace_selection(&mut self, text: &str) -> bool {
+        let Some((from, to)) = self.selection_range() else {
+            self.anchor = None;
+            return false;
+        };
+        self.replace_range(from, to, text);
+        true
+    }
+
+    /// Replaces chars `from..to` with `text` in one rope edit and one history
+    /// step (never merged, and the next edit starts a fresh run).
+    fn replace_range(&mut self, from: usize, to: usize, text: &str) {
+        let before = self.cursor_index();
+        let removed = self.rope.slice(from..to).to_string();
+        let breaks = removed.chars().chain(text.chars()).any(is_break);
+        let row_before = self.rope.char_to_line(from);
+        self.rope.remove(from..to);
+        self.rope.insert(from, text);
+        let after = from + text.chars().count();
+        let row = row_before.min(self.rope.char_to_line(from));
+        self.mark_dirty(if breaks { row.saturating_sub(1) } else { row });
+        self.anchor = None;
+        self.place_cursor(after);
+        self.goal_col = self.col;
+        self.merge_ok = false;
+        self.record(Edit::new(from, &removed, text, before, after, false));
+        self.merge_ok = false;
     }
 
     fn cursor_index(&self) -> usize {
@@ -652,3 +847,5 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 mod tests;
 #[cfg(test)]
 mod undo_tests;
+#[cfg(test)]
+mod selection_tests;

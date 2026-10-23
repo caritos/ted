@@ -75,6 +75,7 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | Ctrl-G | Open the git changes view (again: back to the editor) |
 | Ctrl-T | Open the file tree (again: back to the editor) |
 | Ctrl-E | Open a file by name: the file finder, see [Open file by name](#open-file-by-name) |
+| F4 | Find text in all files, see [Find in files](#find-in-files) |
 | Ctrl-O | Open the buffer list (works from the git view and file tree too) |
 | Ctrl-N / Ctrl-P | Next / previous buffer, wrapping around (also leaves the git view, tree or list) |
 | Ctrl-W | Close the current buffer. A modified one warns first; press Ctrl-W again to close it without saving, any other key cancels. Closing the last buffer leaves one empty unnamed buffer. Ignored in the git view, tree and list |
@@ -117,6 +118,7 @@ Ctrl-X opens a `Command:` prompt in the message row (editor only; it does nothin
 | `save` (`w`) | Save, like Ctrl-S |
 | `undo` / `redo` | Like Ctrl-Z / Ctrl-Y (`u` = `undo`, `red` = `redo`; `re` and `r` are ambiguous with `replace`) |
 | `open` | Open a file by name, like Ctrl-E |
+| `grep` | Find text in all files, like F4 |
 | `replace` | Open the Replace prompt, like Ctrl-R |
 | `qreplace` | Like `replace`, but ask for each match (`qr` is enough); see [Replace](#replace) |
 | `copy` / `cut` / `paste` / `selectall` | Like Ctrl-C / Ctrl-K / Ctrl-V / Ctrl-A (the selection survives opening the prompt, so `copy` works on it) |
@@ -176,6 +178,21 @@ The message row is the query: `Open: edi_`. Type to filter; every character of t
 | Esc / Ctrl-E | Back to the editor, which is as it was |
 
 Ctrl-N, Ctrl-P, Ctrl-O and F1 work as elsewhere; Ctrl-Q follows the quit rules. Ctrl-E does nothing while a prompt is open.
+
+## Find in files
+
+F4 (or the `grep` command) searches the text of the project's files: the same list as the file finder (tracked plus untracked files in a git repository, else a directory walk), read again on every search. The message row is the query and starts with the last term you searched for in any buffer. Type, then Enter: the matching lines are listed as `path:line: text` (indent trimmed), in file order, and the first is selected. Enter again opens the selected hit's file in a buffer (or switches to it) with the cursor on that line, and the term becomes the shared search term, so F3 and Ctrl-F continue from it.
+
+Matching is plain text with smart case like Find: an all-lowercase query ignores case, any capital makes it exact. A line is listed once however often it matches. Files that are not UTF-8, contain a NUL byte or are over 2 MiB are skipped. The list stops at 2,000 hits (the status says `first 2000`).
+
+| Key (find in files) | Action |
+|---|---|
+| Enter | Search when the query is new or was edited, otherwise open the selected hit |
+| Up / Down, PageUp / PageDown, Home / End | Move the selection |
+| Backspace, typing, paste | Edit the query; the old hits stay until Enter, marked `Enter searches again` |
+| Esc / F4 | Back to the editor, which is as it was |
+
+`q` and `?` are text here (F1 still opens help); Ctrl-N, Ctrl-P, Ctrl-O work as elsewhere; Ctrl-Q follows the quit rules. F4 does nothing while a prompt is open.
 
 ## Help
 

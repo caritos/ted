@@ -44,6 +44,7 @@ impl Git for Shared {
 mod clipboard;
 mod command;
 mod finder;
+mod grep;
 mod gutter;
 mod help;
 mod replace;

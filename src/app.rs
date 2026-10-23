@@ -12,6 +12,8 @@ use crate::command::{self, Command};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
 use crate::finder::{self, Finder, FinderAction};
+use crate::grep;
+use crate::grepview::{GrepAction, GrepView};
 use crate::git::Git;
 use crate::gitview::{GitAction, GitView};
 use crate::help::{Help, HelpAction};
@@ -28,6 +30,7 @@ enum Mode {
     Files,
     Buffers,
     Finder,
+    Grep,
     Help,
 }
 
@@ -48,6 +51,8 @@ pub struct App {
     buffer_list: Option<BufferList>,
     /// Created fresh on each Ctrl-E, so the file list is current.
     finder: Option<Finder>,
+    /// Created fresh on each F4, so the results are never old.
+    grep_view: Option<GrepView>,
     mode: Mode,
     /// Ctrl-W warned about a modified buffer; the next Ctrl-W closes it.
     close_armed: bool,
@@ -98,6 +103,7 @@ impl App {
             file_tree: None,
             buffer_list: None,
             finder: None,
+            grep_view: None,
             mode: Mode::Editor,
             close_armed: false,
             quit_armed: false,
@@ -140,6 +146,10 @@ impl App {
 
     pub fn in_finder(&self) -> bool {
         self.mode == Mode::Finder
+    }
+
+    pub fn in_grep(&self) -> bool {
+        self.mode == Mode::Grep
     }
 
     pub fn editor(&self) -> &Editor {
@@ -279,7 +289,7 @@ impl App {
         }
         let plain = !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         // `?` is text in the editor, so only the views (no text input) take it.
-        let help_key = key.code == KeyCode::F(1) || (plain && key.code == KeyCode::Char('?') && !matches!(self.mode, Mode::Editor | Mode::Finder));
+        let help_key = key.code == KeyCode::F(1) || (plain && key.code == KeyCode::Char('?') && !matches!(self.mode, Mode::Editor | Mode::Finder | Mode::Grep));
         if help_key && self.mode != Mode::Help {
             self.enter_help();
             return Flow::Continue;
@@ -295,6 +305,10 @@ impl App {
             }
             if ctrl && key.code == KeyCode::Char('e') {
                 self.enter_finder();
+                return Flow::Continue;
+            }
+            if key.code == KeyCode::F(4) {
+                self.enter_grep();
                 return Flow::Continue;
             }
             if key.code == KeyCode::F(2) {
@@ -367,6 +381,32 @@ impl App {
                     FinderAction::None => {}
                     FinderAction::Back => self.mode = Mode::Editor,
                     FinderAction::Open(rel) => self.open(&rel),
+                }
+            }
+            Mode::Grep => {
+                let Some(view) = &mut self.grep_view else {
+                    self.mode = Mode::Editor;
+                    return Flow::Continue;
+                };
+                match view.handle_key(key) {
+                    GrepAction::None => {}
+                    GrepAction::Back => self.mode = Mode::Editor,
+                    GrepAction::Search(query) => {
+                        let (files, _) = self.project_files();
+                        let found = grep::search(&self.location, &files, &query);
+                        if let Some(view) = &mut self.grep_view {
+                            view.set_found(found);
+                        }
+                    }
+                    GrepAction::Open { path, line } => {
+                        self.open(&path);
+                        if self.mode == Mode::Editor {
+                            self.editor_mut().go_to_line(line);
+                            if let Some(view) = &self.grep_view {
+                                self.search = view.query().to_string();
+                            }
+                        }
+                    }
                 }
             }
             Mode::Help => match self.help.handle_key(key) {
@@ -455,6 +495,12 @@ impl App {
             }
             return;
         }
+        if self.mode == Mode::Grep {
+            if let Some(view) = &mut self.grep_view {
+                view.paste(text);
+            }
+            return;
+        }
         if self.mode != Mode::Editor {
             return;
         }
@@ -513,6 +559,7 @@ impl App {
             Command::Undo => self.editor_mut().undo(),
             Command::Redo => self.editor_mut().redo(),
             Command::OpenFile => self.enter_finder(),
+            Command::Grep => self.enter_grep(),
             Command::Replace => self.editor_mut().open_replace(),
             Command::ReplaceAsk => self.editor_mut().open_replace_ask(),
             Command::Copy => self.copy(),
@@ -562,7 +609,7 @@ impl App {
                     tree.refresh();
                 }
             }
-            Mode::Buffers | Mode::Finder | Mode::Help => {}
+            Mode::Buffers | Mode::Finder | Mode::Grep | Mode::Help => {}
         }
     }
 
@@ -577,6 +624,9 @@ impl App {
         }
         if let (Mode::Finder, Some(finder)) = (self.mode, &self.finder) {
             return finder.render(width, height);
+        }
+        if let (Mode::Grep, Some(view)) = (self.mode, &self.grep_view) {
+            return view.render(width, height);
         }
         match (self.mode, &self.git_view, &self.file_tree, &self.buffer_list) {
             (Mode::GitView, Some(view), _, _) => view.render(width, height, now),
@@ -607,6 +657,23 @@ impl App {
     /// Ctrl-E / `open`: lists the project's files (the version control
     /// view of them, else a directory walk) and starts the name query.
     fn enter_finder(&mut self) {
+        let (files, cut) = self.project_files();
+        self.editor_mut().set_message(String::new());
+        self.finder = Some(Finder::new(files, cut));
+        self.mode = Mode::Finder;
+    }
+
+    /// F4 / `grep`: find in files, starting from the shared search term.
+    fn enter_grep(&mut self) {
+        self.editor_mut().set_message(String::new());
+        self.grep_view = Some(GrepView::new(&self.search));
+        self.mode = Mode::Grep;
+    }
+
+    /// The project's files, relative to `location`: what git knows (tracked
+    /// plus untracked, minus ignored), else a directory walk. The flag says
+    /// the list was cut at `finder::MAX_FILES`.
+    fn project_files(&self) -> (Vec<String>, bool) {
         let (mut files, mut cut) = match self.git.files() {
             Ok(files) => (files, false),
             Err(_) => finder::walk_files(&self.location),
@@ -615,9 +682,7 @@ impl App {
             files.truncate(finder::MAX_FILES);
             cut = true;
         }
-        self.editor_mut().set_message(String::new());
-        self.finder = Some(Finder::new(files, cut));
-        self.mode = Mode::Finder;
+        (files, cut)
     }
 
     fn enter_file_tree(&mut self) {
@@ -651,6 +716,11 @@ impl App {
             Mode::Finder => {
                 if let Some(finder) = &mut self.finder {
                     finder.set_message(message);
+                }
+            }
+            Mode::Grep => {
+                if let Some(view) = &mut self.grep_view {
+                    view.set_message(message);
                 }
             }
             Mode::Help => self.help.set_message(message),

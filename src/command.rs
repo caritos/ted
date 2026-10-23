@@ -2,9 +2,9 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 22] = [
+pub const NAMES: [&str; 26] = [
     "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "replace", "qreplace",
-    "copy", "cut", "paste", "selectall", "open", "grep", "quit",
+    "copy", "cut", "paste", "selectall", "deleteline", "duplicate", "moveup", "movedown", "open", "grep", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,11 @@ pub enum Command {
     Cut,
     Paste,
     SelectAll,
+    /// The line commands act on the cursor's row or the selected rows.
+    DeleteLine,
+    DuplicateLine,
+    MoveLineUp,
+    MoveLineDown,
     /// Open a file by name (the fuzzy finder).
     OpenFile,
     /// Find text in the project's files.
@@ -114,6 +119,10 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "cut" => plain(Command::Cut),
         "paste" => plain(Command::Paste),
         "selectall" => plain(Command::SelectAll),
+        "deleteline" => plain(Command::DeleteLine),
+        "duplicate" => plain(Command::DuplicateLine),
+        "moveup" => plain(Command::MoveLineUp),
+        "movedown" => plain(Command::MoveLineDown),
         "open" => plain(Command::OpenFile),
         "grep" => plain(Command::Grep),
         "quit" => plain(Command::Quit),
@@ -299,6 +308,20 @@ mod tests {
         assert_eq!(err("replace x"), "Usage: replace");
         assert_eq!(matches("re"), vec!["redo", "replace"]);
         assert_eq!(complete("rep"), "replace");
+    }
+
+    #[test]
+    fn line_commands_parse_without_arguments_and_have_unique_prefixes() {
+        assert_eq!(parse("duplicate"), Ok(Command::DuplicateLine));
+        assert_eq!(parse("deleteline"), Ok(Command::DeleteLine));
+        assert_eq!(parse("moveup"), Ok(Command::MoveLineUp));
+        assert_eq!(parse("movedown"), Ok(Command::MoveLineDown));
+        assert_eq!(parse("du"), Ok(Command::DuplicateLine));
+        assert_eq!(parse("del"), Ok(Command::DeleteLine));
+        assert_eq!(parse("moveu"), Ok(Command::MoveLineUp));
+        assert_eq!(err("d"), "Ambiguous: deleteline, duplicate");
+        assert_eq!(err("m"), "Ambiguous: moveup, movedown");
+        assert_eq!(err("moveup 2"), "Usage: moveup");
     }
 
     #[test]

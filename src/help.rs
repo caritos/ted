@@ -57,6 +57,15 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Lines (the selected rows, else the cursor's)",
+        &[
+            ("Ctrl-D", "Duplicate the line"),
+            ("Alt-K", "Delete the line"),
+            ("Alt-Up / Alt-Down", "Move the line up / down"),
+            ("Alt-/ or Ctrl-/", "Comment / uncomment (by file type)"),
+        ],
+    ),
+    (
         "Find / go to line prompt",
         &[
             ("Enter", "Accept and stay at the match"),

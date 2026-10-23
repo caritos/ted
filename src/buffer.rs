@@ -586,6 +586,58 @@ impl Buffer {
         count
     }
 
+    /// Every non-overlapping match of `query` as (row, col) in document order
+    /// (only those fully inside `within` when given), and the match length in
+    /// chars. Same matching as `replace_all`; for stepping through matches.
+    pub fn find_matches(
+        &self,
+        query: &str,
+        within: Option<((usize, usize), (usize, usize))>,
+    ) -> (Vec<(usize, usize)>, usize) {
+        if query.is_empty() {
+            return (Vec::new(), 0);
+        }
+        let (exact, needle) = needle_of(query);
+        let rows = self.line_count();
+        let (first_row, last_row) = within.map_or((0, rows - 1), |(a, b)| (a.0, b.0.min(rows - 1)));
+        let mut scratch = Scratch::default();
+        let mut found = Vec::new();
+        if first_row <= last_row {
+            for (i, line) in self.rope.lines_at(first_row).take(last_row - first_row + 1).enumerate() {
+                let row = first_row + i;
+                let cols = row_matches(line, query, &needle, exact, &mut scratch);
+                found.extend(
+                    non_overlapping(cols, needle.len())
+                        .filter(|&col| within.is_none_or(|(from, to)| (row, col) >= from && (row, col + needle.len()) <= to))
+                        .map(|col| (row, col)),
+                );
+            }
+        }
+        (found, needle.len())
+    }
+
+    /// Replaces the matches at `at` (ascending, non-overlapping (row, col)
+    /// positions from `find_matches`, each `len` chars, in the current text)
+    /// with `with` as ONE undo step; returns how many. The cursor ends at the
+    /// start of the first replacement.
+    pub fn replace_matches(&mut self, at: &[(usize, usize)], len: usize, with: &str) -> usize {
+        let (Some(&first), Some(&last)) = (at.first(), at.last()) else {
+            return 0;
+        };
+        let index = |(row, col): (usize, usize)| self.rope.line_to_char(row) + col;
+        let (start, end) = (index(first), index(last) + len);
+        let mut span = String::new();
+        let mut prev_end = start;
+        for &pos in at {
+            let from = index(pos);
+            span.extend(self.rope.slice(prev_end..from).chars());
+            span.push_str(with);
+            prev_end = from + len;
+        }
+        self.replace_range_to(start, end, &span, start);
+        at.len()
+    }
+
     /// Puts the cursor at the nearest valid position to (`row`, `col`).
     /// Not an edit: leaves the modified flag and dirty row alone.
     pub fn set_cursor(&mut self, row: usize, col: usize) {

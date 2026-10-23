@@ -2,8 +2,9 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 14] = [
-    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "quit",
+pub const NAMES: [&str; 18] = [
+    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "copy",
+    "cut", "paste", "selectall", "quit",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,10 @@ pub enum Command {
     Help,
     Undo,
     Redo,
+    Copy,
+    Cut,
+    Paste,
+    SelectAll,
     Quit,
     WriteQuit,
 }
@@ -96,6 +101,10 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "help" => plain(Command::Help),
         "undo" => plain(Command::Undo),
         "redo" => plain(Command::Redo),
+        "copy" => plain(Command::Copy),
+        "cut" => plain(Command::Cut),
+        "paste" => plain(Command::Paste),
+        "selectall" => plain(Command::SelectAll),
         "quit" => plain(Command::Quit),
         "wq" => plain(Command::WriteQuit),
         // The path keeps its case and inner spaces.
@@ -238,7 +247,8 @@ mod tests {
     fn save_stays_exact_and_prefixes_of_both_are_ambiguous() {
         assert_eq!(parse("save"), Ok(Command::Save));
         assert_eq!(err("sa"), "Ambiguous: save, saveas");
-        assert_eq!(err("s"), "Ambiguous: save, saveas");
+        // `selectall` joined the names starting with s.
+        assert_eq!(err("s"), "Ambiguous: save, saveas, selectall");
         assert_eq!(parse("savea x"), Ok(Command::SaveAs("x".to_string())));
         assert_eq!(matches("sa"), vec!["save", "saveas"]);
     }
@@ -265,6 +275,48 @@ mod tests {
         assert_eq!(matches("u"), vec!["undo"]);
         assert_eq!(complete("un"), "undo");
         assert_eq!(complete("r"), "redo");
+    }
+
+    #[test]
+    fn clipboard_commands_parse_without_arguments() {
+        assert_eq!(parse("copy"), Ok(Command::Copy));
+        assert_eq!(parse("cut"), Ok(Command::Cut));
+        assert_eq!(parse("paste"), Ok(Command::Paste));
+        assert_eq!(parse("selectall"), Ok(Command::SelectAll));
+        assert_eq!(parse("COPY"), Ok(Command::Copy));
+        assert_eq!(err("copy now"), "Usage: copy");
+        assert_eq!(err("cut 3"), "Usage: cut");
+        assert_eq!(err("paste x"), "Usage: paste");
+        assert_eq!(err("selectall x"), "Usage: selectall");
+    }
+
+    #[test]
+    fn new_names_change_which_prefixes_are_ambiguous() {
+        // Unique prefixes of the new names.
+        assert_eq!(parse("co"), Ok(Command::Copy));
+        assert_eq!(parse("cu"), Ok(Command::Cut));
+        assert_eq!(parse("pa"), Ok(Command::Paste));
+        assert_eq!(parse("sel"), Ok(Command::SelectAll));
+        // Still unique: these were before, and the new names do not share them.
+        assert_eq!(parse("cl"), Ok(Command::Close));
+        assert_eq!(parse("pr"), Ok(Command::Prev));
+        assert_eq!(parse("sav"), Err("Ambiguous: save, saveas".to_string()));
+        // No longer unique: one letter now matches more names.
+        assert_eq!(err("c"), "Ambiguous: close, copy, cut");
+        assert_eq!(err("p"), "Ambiguous: prev, paste");
+        assert_eq!(err("s"), "Ambiguous: save, saveas, selectall");
+        assert_eq!(parse("se"), Ok(Command::SelectAll));
+    }
+
+    #[test]
+    fn clipboard_names_complete() {
+        assert_eq!(complete("sel"), "selectall");
+        assert_eq!(complete("pa"), "paste");
+        assert_eq!(complete("c"), "c");
+        assert_eq!(complete("co"), "copy");
+        assert_eq!(complete("cu"), "cut");
+        assert_eq!(matches("c"), vec!["close", "copy", "cut"]);
+        assert_eq!(matches("p"), vec!["prev", "paste"]);
     }
 
     #[test]

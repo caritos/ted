@@ -6,6 +6,14 @@ use crate::highlight::{highlight_line, Language, LineState, Token};
 use crate::screen::Style;
 use crate::text::{display_col, layout, sanitize_char, TAB_STOP};
 
+/// Longest text a prompt takes from a paste (chars).
+const MAX_PROMPT_TEXT: usize = 4096;
+
+/// Chars that end a line (the ones ropey also treats as breaks).
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}')
+}
+
 /// Page size before the first frame tells the editor the screen height.
 const DEFAULT_PAGE: usize = 20;
 
@@ -130,6 +138,53 @@ impl Editor {
     /// Drops the selection (the app does this when the buffer is left or shown).
     pub fn clear_selection(&mut self) {
         self.buffer.clear_selection();
+    }
+
+    /// The selected text, if any (copy).
+    pub fn selected_text(&self) -> Option<String> {
+        self.buffer.selected_text()
+    }
+
+    /// Deletes the selection as one undo step and returns its text (cut);
+    /// `None` and no change when nothing is selected.
+    pub fn cut_selection(&mut self) -> Option<String> {
+        let text = self.buffer.selected_text()?;
+        self.buffer.delete_selection();
+        self.message.clear();
+        Some(text)
+    }
+
+    /// Inserts `text` at the cursor, replacing the selection, as one undo
+    /// step (paste). The caller has normalised the line breaks.
+    pub fn insert_text(&mut self, text: &str) {
+        self.message.clear();
+        self.buffer.insert_str(text);
+    }
+
+    pub fn select_all(&mut self) {
+        self.buffer.select_all();
+    }
+
+    /// Text arriving in one piece (bracketed paste) while a prompt is open:
+    /// line breaks never get in, so a paste cannot accept the prompt; a Go to
+    /// prompt keeps only digits. Returns false when no prompt is open.
+    pub fn paste_into_prompt(&mut self, text: &str) -> bool {
+        let Some(mut prompt) = self.prompt.take() else {
+            return false;
+        };
+        let room = MAX_PROMPT_TEXT.saturating_sub(prompt.text.chars().count());
+        let added: String = match prompt.kind {
+            PromptKind::Goto => text.chars().filter(char::is_ascii_digit).take(room).collect(),
+            _ => text.chars().filter(|&c| !is_line_break(c)).take(room).collect(),
+        };
+        if !added.is_empty() {
+            prompt.text.push_str(&added);
+            if prompt.kind == PromptKind::Find {
+                self.search_from_origin(&mut prompt);
+            }
+        }
+        self.prompt = Some(prompt);
+        true
     }
 
     pub fn in_prompt(&self) -> bool {

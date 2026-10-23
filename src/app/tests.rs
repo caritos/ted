@@ -38,6 +38,7 @@ impl Git for Shared {
     }
 }
 
+mod clipboard;
 mod command;
 mod gutter;
 mod help;

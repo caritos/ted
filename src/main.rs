@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::cursor::{Hide, MoveTo, Show};
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -77,12 +77,17 @@ fn run(mut app: App) -> io::Result<()> {
         // once the deadline has passed), so a slow refresh delays the next
         // one but never blocks keys. Anything other than a key press
         // (including a resize) just redraws.
-        if event::poll(next_tick.saturating_duration_since(Instant::now()))?
-            && let Event::Key(key) = event::read()?
-            && key.kind != KeyEventKind::Release
-            && app.handle_key(key, SystemTime::now()) == Flow::Quit
-        {
-            return Ok(());
+        if event::poll(next_tick.saturating_duration_since(Instant::now()))? {
+            match event::read()? {
+                Event::Key(key)
+                    if key.kind != KeyEventKind::Release
+                        && app.handle_key(key, SystemTime::now()) == Flow::Quit =>
+                {
+                    return Ok(());
+                }
+                Event::Paste(text) => app.paste(&text),
+                _ => {}
+            }
         }
         if Instant::now() >= next_tick {
             app.tick(SystemTime::now());
@@ -158,7 +163,9 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
-        if let Err(e) = execute!(io::stdout(), EnterAlternateScreen, Clear(ClearType::All)) {
+        if let Err(e) = execute!(io::stdout(), EnterAlternateScreen, Clear(ClearType::All), EnableBracketedPaste) {
+            // Some of it may have taken effect: undo what there is.
+            let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
             let _ = disable_raw_mode();
             return Err(e);
         }
@@ -180,6 +187,6 @@ impl Drop for TerminalGuard {
 }
 
 fn restore() {
-    let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
+    let _ = execute!(io::stdout(), DisableBracketedPaste, Show, LeaveAlternateScreen);
     let _ = disable_raw_mode();
 }

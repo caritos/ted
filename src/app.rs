@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
 use crate::bufferlist::{BufferList, ListAction};
+use crate::clipboard::{Clipboard, SystemClipboard};
 use crate::command::{self, Command};
 use crate::editor::{Editor, Flow, View};
 use crate::filetree::{FileTree, TreeAction};
@@ -58,13 +59,29 @@ pub struct App {
     line_numbers: bool,
     /// The last accepted search term, shared by every buffer.
     search: String,
+    clipboard: Box<dyn Clipboard>,
+    /// What the last copy or cut took; paste falls back to it when the
+    /// system clipboard has no text.
+    register: String,
 }
 
 impl App {
-    pub fn new(mut editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
+    /// An app that uses the system clipboard.
+    pub fn new(editor: Editor, location: PathBuf, git: Box<dyn Git>) -> Self {
+        Self::with_clipboard(editor, location, git, Box::new(SystemClipboard::new()))
+    }
+
+    pub fn with_clipboard(
+        mut editor: Editor,
+        location: PathBuf,
+        git: Box<dyn Git>,
+        clipboard: Box<dyn Clipboard>,
+    ) -> Self {
         // One-time hint; the first key clears it like any message.
         editor.set_message("F1: help".to_string());
         App {
+            clipboard,
+            register: String::new(),
             editors: vec![editor],
             current: 0,
             location,
@@ -267,6 +284,16 @@ impl App {
                 self.line_numbers = !self.line_numbers;
                 return Flow::Continue;
             }
+            // Not in a prompt (it took the key above) and not in a view.
+            if ctrl && matches!(key.code, KeyCode::Char('c' | 'k' | 'v')) {
+                self.editor_mut().set_message(String::new());
+                match key.code {
+                    KeyCode::Char('c') => self.copy(),
+                    KeyCode::Char('k') => self.cut(),
+                    _ => self.paste_clipboard(),
+                }
+                return Flow::Continue;
+            }
             let flow = self.editor_mut().handle_key(key);
             return self.finish_key(flow, now);
         }
@@ -327,6 +354,78 @@ impl App {
         Flow::Continue
     }
 
+    /// Remembers `text` as the last copy: in the register always, in the
+    /// system clipboard when that works.
+    fn store(&mut self, text: &str) {
+        self.register.clear();
+        self.register.push_str(text);
+        let _ = self.clipboard.set(text);
+    }
+
+    /// Ctrl-C / `copy`: the selection goes to the clipboard; text and
+    /// selection stay.
+    fn copy(&mut self) {
+        match self.editor().selected_text() {
+            Some(text) => {
+                self.store(&text);
+                let message = format!("Copied {} chars", text.chars().count());
+                self.editor_mut().set_message(message);
+            }
+            None => self.editor_mut().set_message("Nothing selected".to_string()),
+        }
+    }
+
+    /// Ctrl-K / `cut`: like copy, then the selection is deleted (one undo step).
+    fn cut(&mut self) {
+        match self.editor_mut().cut_selection() {
+            Some(text) => {
+                self.store(&text);
+                let message = format!("Cut {} chars", text.chars().count());
+                self.editor_mut().set_message(message);
+            }
+            None => self.editor_mut().set_message("Nothing selected".to_string()),
+        }
+    }
+
+    /// Ctrl-V / `paste`: the system clipboard's text, or the register when
+    /// that is empty or unavailable.
+    fn paste_clipboard(&mut self) {
+        let text = match self.clipboard.get() {
+            Some(text) if !text.is_empty() => text,
+            _ => self.register.clone(),
+        };
+        if text.is_empty() {
+            self.editor_mut().set_message("Nothing to paste".to_string());
+        } else {
+            self.editor_mut().insert_text(&normalize_breaks(&text));
+        }
+    }
+
+    /// Text that arrived in one piece (the terminal's bracketed paste). In
+    /// the editor it is inserted whole as one undo step; in an open prompt it
+    /// goes into the prompt without line breaks (so it can never run a
+    /// command); the views and help ignore it.
+    pub fn paste(&mut self, text: &str) {
+        if self.mode != Mode::Editor {
+            return;
+        }
+        // Like any key: the startup hint goes, pending warnings are withdrawn.
+        if std::mem::take(&mut self.hint_pending) {
+            for editor in &mut self.editors {
+                if editor.message() == "F1: help" {
+                    editor.set_message(String::new());
+                }
+            }
+        }
+        self.quit_armed = false;
+        self.close_armed = false;
+        self.editor_mut().set_message(String::new());
+        if self.editor_mut().paste_into_prompt(text) || text.is_empty() {
+            return;
+        }
+        self.editor_mut().insert_text(&normalize_breaks(text));
+    }
+
     /// After the editor handled a key: runs the command the key accepted, if any.
     fn finish_key(&mut self, flow: Flow, now: SystemTime) -> Flow {
         if let Some(term) = self.editor_mut().take_search() {
@@ -364,6 +463,10 @@ impl App {
             Command::Help => self.enter_help(),
             Command::Undo => self.editor_mut().undo(),
             Command::Redo => self.editor_mut().redo(),
+            Command::Copy => self.copy(),
+            Command::Cut => self.cut(),
+            Command::Paste => self.paste_clipboard(),
+            Command::SelectAll => self.editor_mut().select_all(),
             Command::Quit => return self.quit(),
             Command::WriteQuit => {
                 self.editor_mut().save();
@@ -548,6 +651,15 @@ impl App {
         }
         Buffer::open(path).map_err(|e| format!("Open failed: {e}"))
     }
+}
+
+/// Pasted text with CRLF and lone CR turned into `\n` (tabs and everything
+/// else stay as they are).
+fn normalize_breaks(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('\r') {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
 /// A buffer's row in the buffer list: file name (or `[No Name]`), modified.

@@ -2,8 +2,8 @@
 //! Pure logic, no terminal and no editor state.
 
 /// Canonical command names, in the order they are listed and completed.
-pub const NAMES: [&str; 19] = [
-    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "replace",
+pub const NAMES: [&str; 20] = [
+    "save", "saveas", "goto", "lines", "next", "prev", "close", "buffers", "tree", "git", "help", "undo", "redo", "replace", "qreplace",
     "copy", "cut", "paste", "selectall", "quit",
 ];
 
@@ -23,6 +23,8 @@ pub enum Command {
     Undo,
     Redo,
     Replace,
+    /// Replace with a question for each match.
+    ReplaceAsk,
     Copy,
     Cut,
     Paste,
@@ -103,6 +105,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "undo" => plain(Command::Undo),
         "redo" => plain(Command::Redo),
         "replace" => plain(Command::Replace),
+        "qreplace" => plain(Command::ReplaceAsk),
         "copy" => plain(Command::Copy),
         "cut" => plain(Command::Cut),
         "paste" => plain(Command::Paste),
@@ -332,6 +335,18 @@ mod tests {
         assert_eq!(complete("cu"), "cut");
         assert_eq!(matches("c"), vec!["close", "copy", "cut"]);
         assert_eq!(matches("p"), vec!["prev", "paste"]);
+    }
+
+    #[test]
+    fn qreplace_parses_without_arguments_and_leaves_other_prefixes_alone() {
+        assert_eq!(parse("qreplace"), Ok(Command::ReplaceAsk));
+        assert_eq!(parse("qr"), Ok(Command::ReplaceAsk));
+        assert_eq!(err("qreplace x"), "Usage: qreplace");
+        assert_eq!(parse("q"), Ok(Command::Quit));
+        assert_eq!(parse("qu"), Ok(Command::Quit));
+        assert_eq!(parse("rep"), Ok(Command::Replace));
+        assert_eq!(complete("qr"), "qreplace");
+        assert_eq!(matches("q"), vec!["qreplace", "quit"]);
     }
 
     #[test]

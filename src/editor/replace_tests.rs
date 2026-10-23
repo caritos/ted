@@ -190,6 +190,23 @@ fn match_replaces_the_syntax_colour_on_matched_cells_only() {
     assert_eq!(&v.styles[0][..3], &[Style::Match, Style::Match, Style::Normal]);
     e.handle_key(key(KeyCode::Esc));
     assert_eq!(e.view(30, 5).styles[0][0], Style::Keyword);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn not_found_inside_a_selection_says_so() {
+    let mut e = ed("foo\nbar baz");
+    e.buffer.set_cursor(1, 0);
+    for _ in 0..3 {
+        e.handle_key(shift(KeyCode::Right));
+    }
+    e.handle_key(ctrl('r'));
+    type_str(&mut e, "foo");
+    e.handle_key(key(KeyCode::Enter));
+    e.handle_key(key(KeyCode::Enter));
+    assert_eq!(e.view(40, 5).message, "Not found in selection: foo");
+    assert_eq!(e.buffer().text(), "foo\nbar baz");
+    assert_eq!(e.buffer().selection(), Some(((1, 0), (1, 3))));
 }
 
 #[test]

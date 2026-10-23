@@ -328,7 +328,8 @@ impl Editor {
                             let n = self.buffer.replace_all(&term, &prompt.text, prompt.within);
                             if n == 0 {
                                 self.cancel(&prompt);
-                                self.message = format!("Not found: {term}");
+                                let scope = if prompt.within.is_some() { " in selection" } else { "" };
+                                self.message = format!("Not found{scope}: {term}");
                             } else {
                                 let s = if n == 1 { "" } else { "s" };
                                 self.message = format!("Replaced {n} occurrence{s}");

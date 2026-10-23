@@ -921,6 +921,75 @@ finally:
     shutil.rmtree(cp, ignore_errors=True)
     shutil.rmtree(empty_path, ignore_errors=True)
 
+# 24. replace and match highlighting. While the Find prompt is open the matches
+# are underlined (\x1b[4m, checked on the raw bytes); after Enter there is none.
+# Ctrl-R, `foo` (prefilled from the accepted search), Enter, `bar`, Enter
+# replaces all in one step; Ctrl-Z restores; Esc during `With:` changes nothing.
+CTRL_R = b"\x12"
+rp = tempfile.mkdtemp(prefix="ted-smoke-replace-")
+pid = fd = None
+try:
+    p = os.path.join(rp, "r.txt")
+    with open(p, "w") as f:
+        f.write("".join(f"line {n} foo\n" if n % 2 == 0 else f"line {n}\n" for n in range(12)))
+    pid, fd = spawn([p])
+    drain(fd)
+    send(fd, CTRL_F)
+    drain(fd)
+    for c in b"foo":
+        send(fd, bytes([c]))
+    raw = drain(fd)
+    check("replace: Find underlines the matches", b"\x1b[4m" in raw, raw[-300:])
+    check("replace: the underlined text is the match", b"\x1b[4mfoo" in raw, raw[-300:])
+    send(fd, b"\r")
+    raw = drain(fd)
+    check("replace: no underline once the prompt is closed", b"\x1b[4m" not in raw and b"foo" in plain(raw), raw[-300:])
+    send(fd, CTRL_R)
+    out = last_frame(drain(fd))
+    check("replace: Ctrl-R is prefilled with the search term", b"Replace: foo_" in out, out[-200:])
+    send(fd, b"\r")
+    out = last_frame(drain(fd))
+    check("replace: Enter asks for the new text", b"With (foo): _" in out, out[-200:])
+    for c in b"bar":
+        send(fd, bytes([c]))
+    send(fd, b"\r")
+    out = last_frame(drain(fd))
+    check("replace: says how many were replaced", b"Replaced 6 occurrences" in out, out[-300:])
+    check("replace: text has bar and no foo", b"line 0 bar" in out and b"line 10 bar" in out and b"foo" not in out, out[-400:])
+    check("replace: status shows [+]", b"[+]" in out, out[-300:])
+    send(fd, CTRL_Z)
+    out = last_frame(drain(fd))
+    check("replace: one Ctrl-Z restores the foo lines", b"line 0 foo" in out and b"line 10 foo" in out and b"bar" not in out and b"[+]" not in out, out[-400:])
+    send(fd, CTRL_R)
+    drain(fd)
+    send(fd, b"\r")
+    drain(fd)
+    send(fd, b"zz")
+    out = last_frame(drain(fd))
+    check("replace: the With step shows the typed text", b"With (foo): zz_" in out, out[-200:])
+    send(fd, ESC)
+    out = last_frame(drain(fd))
+    check("replace: Esc during With changes nothing", b"line 0 foo" in out and b"zz" not in out and b"[+]" not in out, out[-300:])
+    send(fd, CTRL_Q)
+    drain(fd)
+    code = wait_exit(pid)
+    check("replace: exit 0", code == 0, code)
+    if code is not None:
+        pid = None
+finally:
+    if pid is not None:
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    shutil.rmtree(rp, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

@@ -1018,6 +1018,23 @@ finally:
             pass
     shutil.rmtree(rp, ignore_errors=True)
 
+# 25. auto-indent: Enter copies the indentation of the line it leaves. Type
+# `    a`, Enter, `b`, Enter, `\tc`, Enter, `d`, save: the file holds the indent.
+path_ai = os.path.join(tmp, "indent.txt")
+pid, fd = spawn([path_ai])
+drain(fd)
+for part in (b"    a", b"\r", b"b", b"\r", b"\tc", b"\r", b"d"):
+    send(fd, part)
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+send(fd, CTRL_Q)
+drain(fd)
+code = wait_exit(pid)
+check("indent: exit 0", code == 0, code)
+saved = open(path_ai).read() if os.path.exists(path_ai) else None
+check("indent: Enter keeps the indentation", saved == "    a\n    b\n        c\n        d", repr(saved))
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

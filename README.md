@@ -67,7 +67,7 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | PageUp / PageDown | Move the cursor one screenful up / down |
 | Arrow keys | Move the cursor. Left and Right wrap across line ends; Up and Down remember the column across short lines |
 | Printable keys | Insert text |
-| Enter | New line |
+| Enter | New line, indented like the line you leave (its leading spaces and tabs, only as far as the cursor is; a selection is replaced; one undo step) |
 | Tab | Insert 4 spaces (an existing tab character is drawn up to the next multiple of 4) |
 | Backspace / Delete | Delete before / under the cursor; at a line edge they join lines (CRLF breaks are removed whole) |
 | Ctrl-G | Open the git changes view (again: back to the editor) |

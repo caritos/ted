@@ -34,6 +34,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-23 (auto-indent)
+- Done (unit-tested, 783 tests in total): `Buffer::insert_newline_indent` (Enter in the editor): `"\n"` plus the leading spaces/tabs of the row where the insertion starts (the selection start, else the cursor), only up to the cursor column, via `insert_str` so it is one undo step and replaces a selection; `insert_newline` is unchanged (still used by tests). Tests: `src/buffer/indent_tests.rs`, `src/editor/indent_tests.rs`.
+- Done (pty smoke, 2 new checks, 150 in total): `    a`, Enter, `b`, Enter, Tab `c`, Enter, `d` saves as `    a\n    b\n        c\n        d`.
+- Not yet verified by hand: the feel in a real terminal; pasting is unaffected (it uses `insert_str` directly).
+- Deferred: extra indent after `{` / `:`, dedent on `}`, stripping the indent of a whitespace-only line left behind by Enter, Shift-Tab, indenting a selection.
 ### 2026-10-23 (current-line number, issue #7)
 - Done (unit-tested, 770 tests in total): `Style::CurrentLineNo` for the gutter of the cursor's row (bold, `main.rs`; others stay dim `LineNo`); no background and no colour, so it suits any theme; absent when the gutter is off or hidden. Tests in `src/editor/gutter_tests.rs`; seven older tests that expected row 0 to be `LineNo` now expect `CurrentLineNo`.
 - Done (pty smoke, 148 checks): the two gutter checks now expect `\x1b[1m  1 ` (bold) and `\x1b[2m  2 ` (dim).

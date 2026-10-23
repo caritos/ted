@@ -258,6 +258,15 @@ impl Buffer {
         self.record(Edit::new(index, "", "\n", index, index + 1, false));
     }
 
+    /// Enter with auto-indent: replaces the selection (if any) with a line
+    /// break followed by the leading spaces and tabs of the row where the
+    /// insertion starts, only as many as lie before that point. One undo step.
+    pub fn insert_newline_indent(&mut self) {
+        let (row, col) = self.selection().map_or_else(|| self.cursor(), |(start, _)| start);
+        let indent: String = self.line(row).chars().take(col).take_while(|&c| c == ' ' || c == '\t').collect();
+        self.insert_str(&format!("\n{indent}"));
+    }
+
     pub fn backspace(&mut self) {
         if self.delete_selection() {
             return;
@@ -1086,3 +1095,5 @@ mod undo_tests;
 mod selection_tests;
 #[cfg(test)]
 mod replace_tests;
+#[cfg(test)]
+mod indent_tests;

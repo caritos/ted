@@ -602,6 +602,8 @@ impl Editor {
             KeyCode::Down if alt && !ctrl => self.move_lines(false),
             KeyCode::Char('/') if alt || ctrl => self.toggle_comment(),
             KeyCode::Char('_' | '7') if ctrl => self.toggle_comment(),
+            // Ctrl-] is 0x1d, which crossterm reports as Ctrl-5.
+            KeyCode::Char(']' | '5') if ctrl && !alt => self.jump_to_bracket(select),
             // Word moves: Option/Alt or Ctrl with the arrows; macOS terminals
             // send Option+Left / Right as Alt-b / Alt-f.
             KeyCode::Left if ctrl || alt => self.buffer.move_word_left_select(select),
@@ -881,6 +883,13 @@ impl Editor {
         }
     }
 
+    /// Ctrl-]: to the matching bracket; says so when there is none.
+    pub fn jump_to_bracket(&mut self, select: bool) {
+        if !self.buffer.move_to_matching_bracket(select) {
+            self.message = "No matching bracket".to_string();
+        }
+    }
+
     /// Redoes the last undone step; says so when there is nothing to redo.
     pub fn redo(&mut self) {
         if !self.buffer.redo() {
@@ -987,3 +996,5 @@ mod indent_tests;
 mod word_tests;
 #[cfg(test)]
 mod lineops_tests;
+#[cfg(test)]
+mod bracket_tests;

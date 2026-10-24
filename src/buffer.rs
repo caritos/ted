@@ -384,6 +384,53 @@ impl Buffer {
         i
     }
 
+    /// Moves to the partner of the bracket under the cursor, else of the one
+    /// just before it; with `select` the selection is extended. Only brackets
+    /// of the same kind count for nesting (strings and comments are not
+    /// skipped). Returns false, changing nothing, without a bracket or a partner.
+    pub fn move_to_matching_bracket(&mut self, select: bool) -> bool {
+        let Some(target) = self.matching_bracket_index() else {
+            return false;
+        };
+        self.shift(select, |b| {
+            b.merge_ok = false;
+            b.place_cursor(target);
+            b.goal_col = b.col;
+        });
+        true
+    }
+
+    fn matching_bracket_index(&self) -> Option<usize> {
+        let len = self.rope.len_chars();
+        let at = self.cursor_index();
+        let start = [Some(at).filter(|&i| i < len), at.checked_sub(1)]
+            .into_iter()
+            .flatten()
+            .find(|&i| bracket_pair(self.rope.char(i)).is_some())?;
+        let (open, close, forward) = bracket_pair(self.rope.char(start))?;
+        let mut depth = 0usize;
+        let mut i = start;
+        loop {
+            let c = self.rope.char(i);
+            if c == open && forward || c == close && !forward {
+                depth += 1;
+            } else if c == close && forward || c == open && !forward {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            if forward {
+                i += 1;
+                if i >= len {
+                    return None;
+                }
+            } else {
+                i = i.checked_sub(1)?;
+            }
+        }
+    }
+
     /// Char index where a word move to the right from the cursor lands.
     fn word_right_index(&self) -> usize {
         let len = self.rope.len_chars();
@@ -980,6 +1027,15 @@ impl Edit {
     }
 }
 
+/// For a bracket: (opening, closing, whether `c` is the opening one).
+fn bracket_pair(c: char) -> Option<(char, char, bool)> {
+    match c {
+        '(' | '[' | '{' => Some((c, match c { '(' => ')', '[' => ']', _ => '}' }, true)),
+        ')' | ']' | '}' => Some((match c { ')' => '(', ']' => '[', _ => '{' }, c, false)),
+        _ => None,
+    }
+}
+
 /// Whether `c` belongs to a word for the word moves: letters, digits, `_`.
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
@@ -1173,3 +1229,5 @@ mod indent_tests;
 mod word_tests;
 #[cfg(test)]
 mod lines_tests;
+#[cfg(test)]
+mod bracket_tests;

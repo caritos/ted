@@ -1203,6 +1203,25 @@ send(fd, CTRL_Q)
 drain(fd)
 check("lines: exit 0", wait_exit(pid) == 0)
 
+# 30. Ctrl-] jumps to the matching bracket: in `f(a, (b))` from the first `(`
+# to the last `)`, where typing X lands before it.
+path_br = os.path.join(tmp, "bracket.txt")
+with open(path_br, "w") as f:
+    f.write("f(a, (b))\n")
+pid, fd = spawn([path_br])
+drain(fd)
+send(fd, b"\x1b[C")
+send(fd, b"\x1d")
+send(fd, b"X")
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+saved = open(path_br).read()
+check("bracket: Ctrl-] jumps to the partner", saved == "f(a, (b)X)\n", repr(saved))
+send(fd, CTRL_Q)
+drain(fd)
+check("bracket: exit 0", wait_exit(pid) == 0)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

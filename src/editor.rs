@@ -618,6 +618,12 @@ impl Editor {
             KeyCode::Backspace => self.buffer.backspace(),
             KeyCode::Delete => self.buffer.delete(),
             KeyCode::Esc => self.buffer.clear_selection(),
+            KeyCode::BackTab => {
+                self.buffer.dedent_lines();
+            }
+            KeyCode::Tab if self.buffer.selection_spans_rows() => {
+                self.buffer.indent_lines();
+            }
             KeyCode::Tab => {
                 if self.buffer.selection().is_some() {
                     // One undo step together with the deletion.
@@ -996,5 +1002,7 @@ mod indent_tests;
 mod word_tests;
 #[cfg(test)]
 mod lineops_tests;
+#[cfg(test)]
+mod block_indent_tests;
 #[cfg(test)]
 mod bracket_tests;

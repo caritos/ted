@@ -39,6 +39,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-24 (block indent / dedent)
+- Done (unit-tested, 958 tests in total): `Buffer::indent_lines` / `dedent_lines` / `selection_spans_rows` in `buffer/lines.rs` (block = rows the selection touches, else the cursor row; indent adds 4 spaces to non-blank rows, dedent removes up to 4 spaces or one tab; selection and cursor kept; one undo step; false and no change when nothing to do). Editor: Tab on a selection over 2+ rows indents (a one-row selection is still replaced by the spaces), Shift-Tab (`BackTab`) dedents. Tests: `src/buffer/block_indent_tests.rs` (9), `src/editor/block_indent_tests.rs` (6). Help row in Lines, README row.
+- Done (pty smoke, 3 new checks): Shift+Down x2, Tab saves `    a\n    b\nc`; ESC [ Z restores; exit 0.
+- Not yet verified by hand: Shift-Tab in the user's terminal / tmux (usually ESC [ Z).
+- Deferred: a configurable indent width, dedent by Tab-stop alignment, indent with real tabs.
 ### 2026-10-23 (matching bracket)
 - Done (unit-tested): `Buffer::move_to_matching_bracket(select)` in `buffer.rs` (bracket under the cursor, else just before it; `()` `[]` `{}`, nesting counted per kind, strings and comments not skipped; false and no change without a partner), `Editor::jump_to_bracket` on Ctrl-] (reported by crossterm as Ctrl-5 or `]`; Shift selects; message `No matching bracket`). Tests: `src/buffer/bracket_tests.rs` (11), `src/editor/bracket_tests.rs` (6, written after the buffer code, so the buffer ones were not seen failing first). Help row under Words, README row. No command (would add prefix churn).
 - Done (pty smoke, 2 new checks): Ctrl-] then X on `f(a, (b))` saves `f(a, (b)X)`, exit 0.

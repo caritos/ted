@@ -14,6 +14,12 @@ impl Buffer {
         }
     }
 
+    /// Whether the selection covers more than one row for the line operations.
+    pub fn selection_spans_rows(&self) -> bool {
+        let (r0, r1) = self.block_rows();
+        self.selection().is_some() && r1 > r0
+    }
+
     fn row_start(&self, row: usize) -> usize {
         self.rope.line_to_char(row)
     }
@@ -113,6 +119,73 @@ impl Buffer {
         self.replace_range_to(from, to, &text, after);
         let rows = |r: usize| if up { r - 1 } else { r + 1 };
         self.restore_selection(anchor.map(|(r, c)| (rows(r), c)));
+        true
+    }
+
+    /// Adds `TAB_STOP` spaces to the start of the block's non-blank rows.
+    /// False (no change) when every row is blank.
+    pub fn indent_lines(&mut self) -> bool {
+        self.reindent(true)
+    }
+
+    /// Removes up to `TAB_STOP` leading spaces (or one tab) from the block's rows.
+    /// False (no change) when no row starts with whitespace.
+    pub fn dedent_lines(&mut self) -> bool {
+        self.reindent(false)
+    }
+
+    fn reindent(&mut self, indent: bool) -> bool {
+        let (r0, r1) = self.block_rows();
+        let lines: Vec<String> = (r0..=r1).map(|r| self.line(r)).collect();
+        let pad = " ".repeat(crate::text::TAB_STOP);
+        // (chars removed, chars added) at the start of each row.
+        let edits: Vec<(usize, usize)> = lines
+            .iter()
+            .map(|l| {
+                if indent {
+                    (0, if l.trim().is_empty() { 0 } else { pad.len() })
+                } else if l.starts_with('\t') {
+                    (1, 0)
+                } else {
+                    (l.chars().take(pad.len()).take_while(|&c| c == ' ').count(), 0)
+                }
+            })
+            .collect();
+        if edits.iter().all(|&e| e == (0, 0)) {
+            return false;
+        }
+        let mut text = String::new();
+        let mut new_starts = Vec::new();
+        let mut at = self.row_start(r0);
+        for (i, line) in lines.iter().enumerate() {
+            let (del, add) = edits[i];
+            let new_line: String = pad[..add].chars().chain(line.chars().skip(del)).collect();
+            let row_break = self.row_break(r0 + i);
+            new_starts.push(at);
+            at += new_line.chars().count() + row_break.chars().count();
+            text.push_str(&new_line);
+            text.push_str(&row_break);
+        }
+        let total_shift = at as isize - self.row_end(r1) as isize;
+        let new_index = |buf: &Buffer, (row, col): (usize, usize)| -> usize {
+            if row < r0 {
+                return buf.row_start(row) + col;
+            }
+            if row > r1 {
+                return (buf.row_start(row) + col).saturating_add_signed(total_shift);
+            }
+            let (del, add) = edits[row - r0];
+            new_starts[row - r0] + col.saturating_sub(del) + add
+        };
+        let after = new_index(self, (self.row, self.col));
+        let anchor = self.selection_anchor();
+        let anchor_after = anchor.map(|p| new_index(self, p));
+        let (from, to) = (self.row_start(r0), self.row_end(r1));
+        self.replace_range_to(from, to, &text, after);
+        if let Some(index) = anchor_after {
+            let row = self.rope.char_to_line(index.min(self.rope.len_chars()));
+            self.restore_selection(Some((row, index - self.row_start(row))));
+        }
         true
     }
 

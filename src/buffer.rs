@@ -1230,4 +1230,6 @@ mod word_tests;
 #[cfg(test)]
 mod lines_tests;
 #[cfg(test)]
+mod block_indent_tests;
+#[cfg(test)]
 mod bracket_tests;

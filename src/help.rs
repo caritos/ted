@@ -64,6 +64,7 @@ pub(crate) const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Alt-K", "Delete the line"),
             ("Alt-Up / Alt-Down", "Move the line up / down"),
             ("Alt-/ or Ctrl-/", "Comment / uncomment (by file type)"),
+            ("Tab / Shift-Tab", "Indent / dedent the selected rows"),
         ],
     ),
     (

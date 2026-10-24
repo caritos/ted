@@ -39,6 +39,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-24 (smart indent)
+- Done (unit-tested, 971 tests in total): `insert_newline_indent` adds one level after `{ ( [` (last non-blank char before the cursor; no selection) and splits `{|}` onto three rows with the cursor in the middle (one undo step); `Buffer::insert_closer` (typed `} ) ]` on a whitespace-only row takes one level off first, one undo step), wired in `Editor::handle_key`. Tests: `src/buffer/smart_indent_tests.rs` (10), `src/editor/smart_indent_tests.rs` (3). No help row (behaviour, not a key).
+- Done (pty smoke, 2 new checks): typed `a {`, Enter, `y`, Enter, `}` and the `{}` split give the expected text.
+- Not yet verified by hand: how it feels while typing real code; it applies to every file type (also plain text and Python, where `:` does not indent).
+- Deferred: `:` for Python, language-aware rules, auto-closing brackets, a toggle to turn it off.
 ### 2026-10-24 (block indent / dedent)
 - Done (unit-tested, 958 tests in total): `Buffer::indent_lines` / `dedent_lines` / `selection_spans_rows` in `buffer/lines.rs` (block = rows the selection touches, else the cursor row; indent adds 4 spaces to non-blank rows, dedent removes up to 4 spaces or one tab; selection and cursor kept; one undo step; false and no change when nothing to do). Editor: Tab on a selection over 2+ rows indents (a one-row selection is still replaced by the spaces), Shift-Tab (`BackTab`) dedents. Tests: `src/buffer/block_indent_tests.rs` (9), `src/editor/block_indent_tests.rs` (6). Help row in Lines, README row.
 - Done (pty smoke, 3 new checks): Shift+Down x2, Tab saves `    a\n    b\nc`; ESC [ Z restores; exit 0.

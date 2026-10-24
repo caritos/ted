@@ -1245,6 +1245,21 @@ send(fd, CTRL_Q)
 drain(fd)
 check("block indent: exit 0", wait_exit(pid) == 0)
 
+# 32. smart indent: Enter after `{` indents, `}` on a blank indented row
+# dedents, Enter between `{}` opens the block.
+path_si = os.path.join(tmp, "smart.txt")
+pid, fd = spawn([path_si])
+drain(fd)
+send(fd, b"a {\ry\r}\r{}\x1b[D\rz")
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+saved = open(path_si).read() if os.path.exists(path_si) else "<none>"
+send(fd, CTRL_Q)
+drain(fd)
+check("smart indent: result", saved == "a {\n    y\n}\n{\n    z\n}", repr(saved))
+check("smart indent: exit 0", wait_exit(pid) == 0)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

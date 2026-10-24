@@ -613,6 +613,7 @@ impl Editor {
             KeyCode::Backspace if ctrl || alt => self.buffer.delete_word_left(),
             KeyCode::Delete if ctrl || alt => self.buffer.delete_word_right(),
             KeyCode::Char('d') if alt && !ctrl => self.buffer.delete_word_right(),
+            KeyCode::Char(c @ ('}' | ')' | ']')) if !ctrl && !alt => self.buffer.insert_closer(c),
             KeyCode::Char(c) if !ctrl && !alt => self.buffer.insert_char(c),
             KeyCode::Enter => self.buffer.insert_newline_indent(),
             KeyCode::Backspace => self.buffer.backspace(),
@@ -1002,6 +1003,8 @@ mod indent_tests;
 mod word_tests;
 #[cfg(test)]
 mod lineops_tests;
+#[cfg(test)]
+mod smart_indent_tests;
 #[cfg(test)]
 mod block_indent_tests;
 #[cfg(test)]

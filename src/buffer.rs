@@ -263,8 +263,38 @@ impl Buffer {
     /// insertion starts, only as many as lie before that point. One undo step.
     pub fn insert_newline_indent(&mut self) {
         let (row, col) = self.selection().map_or_else(|| self.cursor(), |(start, _)| start);
-        let indent: String = self.line(row).chars().take(col).take_while(|&c| c == ' ' || c == '\t').collect();
-        self.insert_str(&format!("\n{indent}"));
+        let line = self.line(row);
+        let indent: String = line.chars().take(col).take_while(|&c| c == ' ' || c == '\t').collect();
+        let opener = line.chars().take(col).filter(|c| !c.is_whitespace()).last().filter(|c| matches!(c, '{' | '(' | '['));
+        let Some(opener) = opener.filter(|_| self.selection().is_none()) else {
+            self.insert_str(&format!("\n{indent}"));
+            return;
+        };
+        let level = if indent.starts_with('\t') { "\t".to_string() } else { " ".repeat(crate::text::TAB_STOP) };
+        let inner = format!("{indent}{level}");
+        // `{|}`: the closer goes to its own line, the cursor stays between.
+        let closer = bracket_pair(opener).map(|(_, close, _)| close);
+        if line.chars().nth(col) == closer {
+            let at = self.cursor_index();
+            let after = at + 1 + inner.chars().count();
+            self.replace_range_to(at, at, &format!("\n{inner}\n{indent}"), after);
+        } else {
+            self.insert_str(&format!("\n{inner}"));
+        }
+    }
+
+    /// Types a closing bracket; on a row that is only whitespace before the
+    /// cursor it first takes one indent level (a tab or up to 4 spaces) off,
+    /// as one undo step. A selection is replaced like any typed char.
+    pub fn insert_closer(&mut self, c: char) {
+        let before: Vec<char> = self.line(self.row).chars().take(self.col).collect();
+        if self.selection().is_some() || before.is_empty() || !before.iter().all(|&b| b == ' ' || b == '\t') {
+            self.insert_char(c);
+            return;
+        }
+        let cut = if before.last() == Some(&'\t') { 1 } else { before.iter().rev().take(crate::text::TAB_STOP).take_while(|&&b| b == ' ').count() };
+        let at = self.cursor_index();
+        self.replace_range(at - cut, at, &c.to_string());
     }
 
     pub fn backspace(&mut self) {
@@ -1229,6 +1259,8 @@ mod indent_tests;
 mod word_tests;
 #[cfg(test)]
 mod lines_tests;
+#[cfg(test)]
+mod smart_indent_tests;
 #[cfg(test)]
 mod block_indent_tests;
 #[cfg(test)]

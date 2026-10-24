@@ -39,6 +39,11 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-23 (matching bracket)
+- Done (unit-tested): `Buffer::move_to_matching_bracket(select)` in `buffer.rs` (bracket under the cursor, else just before it; `()` `[]` `{}`, nesting counted per kind, strings and comments not skipped; false and no change without a partner), `Editor::jump_to_bracket` on Ctrl-] (reported by crossterm as Ctrl-5 or `]`; Shift selects; message `No matching bracket`). Tests: `src/buffer/bracket_tests.rs` (11), `src/editor/bracket_tests.rs` (6, written after the buffer code, so the buffer ones were not seen failing first). Help row under Words, README row. No command (would add prefix churn).
+- Done (pty smoke, 2 new checks): Ctrl-] then X on `f(a, (b))` saves `f(a, (b)X)`, exit 0.
+- Not yet verified by hand: Ctrl-] in the user's terminal / tmux / ssh (0x1d may be swallowed, e.g. telnet-style escape in some tools).
+- Deferred: skipping brackets in strings / comments, `<>` pairs, highlighting the partner, select-inside-brackets, jumping to the enclosing bracket when not on one.
 ### 2026-10-23 (line operations)
 - Done (unit-tested, 926 tests in total): 28 buffer tests (delete incl. last line without a break / only line / CRLF / selection rules, duplicate, move incl. per-position breaks and selection kept, comment/uncomment incl. block indent, blanks, mixed rows, cursor mapping, one undo step each, a sweep of every cursor position over odd texts), 12 editor tests (keys, comment prefix by file type, no-syntax and blank messages, prompt ignores them, highlight styles equal a fresh editor after a move), 3 app tests (commands, views ignore the keys), command tests. Help has a "Lines" section. Chose Ctrl-D (free), Alt-K, Alt-Up/Down, Alt-/ (+ Ctrl-/ spellings), and commands for terminals without Meta.
 - Done (pty smoke, 3 new checks): Ctrl-D, ESC [1;3B, ESC / then save gives `a b // a c`; ESC k deletes it; exit 0.

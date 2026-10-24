@@ -71,6 +71,7 @@ The editor shows a line number gutter on the left, on by default: the number is 
 | Alt-Left / Alt-Right | Move by word (Ctrl-Left / Ctrl-Right too; Alt-B / Alt-F is what macOS Terminal sends for Option+arrows; with Shift the selection grows). A word is letters, digits and `_`; punctuation and line breaks are skipped |
 | Alt-Backspace / Alt-D | Delete the previous / next word (Ctrl-Backspace / Ctrl-Delete too; with a selection, just the selection); one undo step |
 | Ctrl-] | Jump to the bracket matching the one under (else just before) the cursor: `()`, `[]`, `{}`, nesting counted per kind, strings and comments not skipped. Shift extends the selection to it. "No matching bracket" when there is none |
+| Tab / Shift-Tab | With a selection over two or more rows, Tab indents every non-blank row by 4 spaces; Shift-Tab (selection or not) removes up to 4 leading spaces or one tab from the rows. The selection stays; one undo step |
 | Ctrl-D | Duplicate the line below itself (the cursor moves onto the copy) |
 | Alt-K | Delete the line, break included |
 | Alt-Up / Alt-Down | Move the line up / down (the cursor follows) |

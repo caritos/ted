@@ -1222,6 +1222,29 @@ send(fd, CTRL_Q)
 drain(fd)
 check("bracket: exit 0", wait_exit(pid) == 0)
 
+# 31. block indent: select two rows (Shift+Down x2), Tab indents, ESC [ Z
+# (Shift-Tab) dedents again.
+path_bi = os.path.join(tmp, "indent.txt")
+with open(path_bi, "w") as f:
+    f.write("a\nb\nc\n")
+pid, fd = spawn([path_bi])
+drain(fd)
+send(fd, b"\x1b[1;2B\x1b[1;2B\t")
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+saved = open(path_bi).read()
+check("block indent: Tab indents the selected rows", saved == "    a\n    b\nc\n", repr(saved))
+send(fd, b"\x1b[1;2A\x1b[1;2A\x1b[Z")
+drain(fd)
+send(fd, CTRL_S)
+drain(fd)
+saved = open(path_bi).read()
+check("block indent: Shift-Tab dedents them", saved == "a\nb\nc\n", repr(saved))
+send(fd, CTRL_Q)
+drain(fd)
+check("block indent: exit 0", wait_exit(pid) == 0)
+
 shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n%d failure(s)" % len(failures))

@@ -53,6 +53,9 @@ pub struct App {
     finder: Option<Finder>,
     /// Created fresh on each F4, so the results are never old.
     grep_view: Option<GrepView>,
+    /// Paths of the buffers used so far in the editor, most recent first;
+    /// the finder lists them before the rest.
+    recent: Vec<PathBuf>,
     mode: Mode,
     /// Ctrl-W warned about a modified buffer; the next Ctrl-W closes it.
     close_armed: bool,
@@ -104,6 +107,7 @@ impl App {
             buffer_list: None,
             finder: None,
             grep_view: None,
+            recent: Vec::new(),
             mode: Mode::Editor,
             close_armed: false,
             quit_armed: false,
@@ -239,6 +243,7 @@ impl App {
                 }
             }
         }
+        self.touch_current();
         // Whatever buffer is current gets the shared term before it sees the key.
         if self.mode == Mode::Editor && !self.search.is_empty() {
             let term = self.search.clone();
@@ -660,8 +665,30 @@ impl App {
 
     /// Ctrl-E / `open`: lists the project's files (the version control
     /// view of them, else a directory walk) and starts the name query.
+    /// Notes the current buffer's file as the most recently used one.
+    fn touch_current(&mut self) {
+        if self.mode != Mode::Editor {
+            return;
+        }
+        let Some(path) = self.editors[self.current].buffer().path().map(Path::to_path_buf) else {
+            return;
+        };
+        if self.recent.first() != Some(&path) {
+            self.recent.retain(|p| *p != path);
+            self.recent.insert(0, path);
+            self.recent.truncate(50);
+        }
+    }
+
     fn enter_finder(&mut self) {
-        let (files, cut) = self.project_files();
+        self.touch_current();
+        let (mut files, cut) = self.project_files();
+        // Recently used files first (stable, so the rest keeps its order).
+        let rank = |f: &String| {
+            let full = self.location.join(f);
+            self.recent.iter().position(|p| *p == full || p.as_path() == Path::new(f)).unwrap_or(usize::MAX)
+        };
+        files.sort_by_key(rank);
         self.editor_mut().set_message(String::new());
         self.finder = Some(Finder::new(files, cut));
         self.mode = Mode::Finder;

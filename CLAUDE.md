@@ -39,6 +39,10 @@ A small terminal text editor in Rust, for my own use. Goal: it just works, no co
 - A missing file opens as an empty buffer; any other read error (incl. non-UTF-8) is an error. Never overwrite on a failed read.
 
 ## Log
+### 2026-10-25 (recent files first in the finder)
+- Done (unit-tested, 973 tests in total): `App.recent` (paths of buffers used in editor mode, most recent first, 50 kept; noted at the start of each key and on Ctrl-E); `enter_finder` stably sorts the file list by it, so the empty query and equal scores list recent files first. Tests in `src/app/tests/finder.rs` (2).
+- Not yet verified by hand: that the paths the app opens match the paths in the git list in real use (matched as `location/relative` or the bare relative path; symlinked or `..` locations may not match and then just keep list order). Not remembered between sessions.
+- Deferred: persisting recents, showing a recent marker.
 ### 2026-10-24 (smart indent)
 - Done (unit-tested, 971 tests in total): `insert_newline_indent` adds one level after `{ ( [` (last non-blank char before the cursor; no selection) and splits `{|}` onto three rows with the cursor in the middle (one undo step); `Buffer::insert_closer` (typed `} ) ]` on a whitespace-only row takes one level off first, one undo step), wired in `Editor::handle_key`. Tests: `src/buffer/smart_indent_tests.rs` (10), `src/editor/smart_indent_tests.rs` (3). No help row (behaviour, not a key).
 - Done (pty smoke, 2 new checks): typed `a {`, Enter, `y`, Enter, `}` and the `{}` split give the expected text.

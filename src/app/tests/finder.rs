@@ -181,3 +181,35 @@ fn the_finder_draws_at_every_size() {
         }
     }
 }
+
+#[test]
+fn recently_used_files_come_first_when_the_query_is_empty() {
+    let dir = Temp::new("finder-recent");
+    for f in ["a.rs", "b.rs", "c.rs", "d.rs"] {
+        dir.file(f, "x\n");
+    }
+    let mut app = listed(&dir, &["a.rs", "b.rs", "c.rs", "d.rs"]);
+    for name in ["c", "b"] {
+        app.handle_key(ctrl('e'), t(1000));
+        type_str(&mut app, &format!("{name}.rs"));
+        app.handle_key(key(KeyCode::Enter), t(1000));
+    }
+    app.handle_key(ctrl('e'), t(1000));
+    let rows: Vec<String> = (0..4).map(|i| row(&mut app, i).trim().to_string()).collect();
+    assert_eq!(rows, ["b.rs", "c.rs", "a.rs", "d.rs"]);
+}
+
+#[test]
+fn recency_breaks_ties_between_equal_matches() {
+    let dir = Temp::new("finder-recent-tie");
+    for f in ["x1.rs", "x2.rs"] {
+        dir.file(f, "x\n");
+    }
+    let mut app = listed(&dir, &["x1.rs", "x2.rs"]);
+    app.handle_key(ctrl('e'), t(1000));
+    type_str(&mut app, "x2.rs");
+    app.handle_key(key(KeyCode::Enter), t(1000));
+    app.handle_key(ctrl('e'), t(1000));
+    type_str(&mut app, "rs");
+    assert_eq!(row(&mut app, 0).trim(), "x2.rs");
+}

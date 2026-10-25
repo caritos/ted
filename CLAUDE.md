@@ -2,6 +2,8 @@
 
 A small terminal text editor in Rust, for my own use. Goal: it just works, no configuration.
 
+Resuming after a pause: read `docs/STATE.md` first (status, gaps, unverified items, how to resume).
+
 ## Layout
 - `src/buffer.rs` - rope-backed text + cursor + file load/atomic save + the undo/redo edit history (per buffer, capped at 10,000 steps, drives `is_modified`); records the lowest edited row (`take_dirty_row`) for the highlight cache. No terminal code.
 - `src/editor.rs` - key handling, scrolling, status/message (plus a `[i/n]` tag and the line number setting, both set by the app; `scroll_col` and the cursor column are display columns, tabs expand to 4). `Editor::view()` returns a pure `View`; with line numbers on, its lines start with the gutter (`Style::LineNo`, hidden when fewer than 10 text columns would remain).
